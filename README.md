@@ -94,8 +94,8 @@ You do not have to trust the published APK — you can build your own.
 **Steps**
 
 ```bash
-git clone https://github.com/SJbuilds04/NOTE.git
-cd NOTE
+git clone https://github.com/saishivasanjeethpaikarao-jpg/-Vibe2X.git
+cd -Vibe2X
 npm install
 
 # Generate the native Android project (android/ is not committed)
@@ -273,7 +273,8 @@ contain provider-specific playback logic.
 
 ## Credits
 
-Built by **[Sanyam Jain](https://github.com/SJbuilds04)** (SJBUILDS).
+Built by **[saishivasanjeethpaikarao-jpg](https://github.com/saishivasanjeethpaikarao-jpg)**. (Vibe2X Fork)
+Originally created by Sanyam Jain (NØTE).
 
 Stream resolution is powered by the excellent
 [NewPipe Extractor](https://github.com/TeamNewPipe/NewPipeExtractor) by Team NewPipe.
