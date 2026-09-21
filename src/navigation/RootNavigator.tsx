@@ -9,6 +9,7 @@ import ProfileSetupScreen from '../screens/ProfileSetup';
 import PlaylistDetailScreen from '../screens/PlaylistDetail';
 import SettingsScreen from '../screens/Settings';
 import NowPlayingScreen from '../screens/NowPlaying';
+import QueueScreen from '../screens/QueueScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -41,6 +42,11 @@ export const RootNavigator = () => {
         <Stack.Screen 
           name="NowPlaying" 
           component={NowPlayingScreen} 
+          options={{ presentation: 'fullScreenModal' }}
+        />
+        <Stack.Screen 
+          name="Queue" 
+          component={QueueScreen} 
           options={{ presentation: 'fullScreenModal' }}
         />
       </Stack.Navigator>

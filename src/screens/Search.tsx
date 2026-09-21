@@ -336,6 +336,7 @@ export default function SearchScreen() {
           track={currentTrack}
           isPlaying={isPlaying}
           onPlayPause={togglePlayPause}
+          onNext={next}
           onPress={() => navigation.navigate('NowPlaying' as never)}
         />
       )}

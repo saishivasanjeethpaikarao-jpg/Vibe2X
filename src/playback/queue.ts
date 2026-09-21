@@ -124,8 +124,12 @@ export class Queue {
   /** Append to the end of the queue. */
   add(tracks: Track | Track[]): void {
     const incoming = Array.isArray(tracks) ? tracks : [tracks];
-    const existing = new Set(this.tracks.map((t) => t.id));
-    const fresh = incoming.filter((t) => !existing.has(t.id));
+    const seen = new Set(this.tracks.map((t) => t.id));
+    const fresh = incoming.filter((t) => {
+      if (seen.has(t.id)) return false;
+      seen.add(t.id); // also dedupes within the incoming batch
+      return true;
+    });
     if (!fresh.length) return;
 
     const firstNew = this.tracks.length;
@@ -144,11 +148,16 @@ export class Queue {
     // Remove any existing copies so "play next" actually moves them.
     for (const t of incoming) this.remove(t.id, { keepCurrent: true });
 
+    // Don't re-add the currently playing track (remove skipped it above).
+    const currentId = this.current?.id;
+    const toPush = incoming.filter((t) => t.id !== currentId);
+    if (!toPush.length) return;
+
     const firstNew = this.tracks.length;
-    this.tracks.push(...incoming);
+    this.tracks.push(...toPush);
 
     const insertAt = this.position + 1;
-    const newOrder = incoming.map((_, i) => firstNew + i);
+    const newOrder = toPush.map((_, i) => firstNew + i);
     this.order.splice(insertAt, 0, ...newOrder);
 
     if (this.position < 0 && this.order.length) this.position = 0;
@@ -162,16 +171,16 @@ export class Queue {
     const wasCurrent = this.currentIndex === trackIndex;
     if (wasCurrent && opts.keepCurrent) return false;
 
+    // Remove ALL occurrences of this index from the play order.
     const orderPos = this.order.indexOf(trackIndex);
-
     this.tracks.splice(trackIndex, 1);
-    this.order.splice(orderPos, 1);
+    this.order = this.order.filter((i) => i !== trackIndex);
     // Every index after the removed one shifts down by one.
     this.order = this.order.map((i) => (i > trackIndex ? i - 1 : i));
 
-    if (orderPos < this.position) {
+    if (orderPos >= 0 && orderPos < this.position) {
       this.position -= 1;
-    } else if (orderPos === this.position) {
+    } else if (orderPos >= 0 && orderPos === this.position) {
       // Stay at the same slot so the next track takes its place.
       this.position = Math.min(this.position, this.order.length - 1);
     }
@@ -266,6 +275,12 @@ export class Queue {
     return null; // end of queue
   }
 
+  /**
+   * Move to the previous track.
+   *
+   * Returns the track to play, or `null` when at the start of the queue with
+   * repeat off — callers should seek to 0:00 rather than re-resolving.
+   */
   previous(): Track | null {
     if (!this.tracks.length) return null;
 
@@ -279,7 +294,7 @@ export class Queue {
       return this.current;
     }
 
-    return this.current; // already first: restart it
+    return null; // already first: caller should seek to 0
   }
 
   /** Jump to a specific track by id. */

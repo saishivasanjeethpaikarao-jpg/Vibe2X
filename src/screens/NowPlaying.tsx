@@ -60,7 +60,6 @@ export default function NowPlayingScreen() {
   } = usePlayer();
 
   const { isLiked, toggleLike } = useLibrary();
-  const [showQueue, setShowQueue] = useState(false);
   const [showSource, setShowSource] = useState(false);
   /** Track whose "add to playlist" sheet is open. */
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
@@ -196,49 +195,29 @@ export default function NowPlayingScreen() {
           <TouchableOpacity>
             <Share color={COLORS.text.secondary} size={24} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setShowQueue((v) => !v)}>
+          <TouchableOpacity onPress={() => (navigation as any).navigate('Queue')}>
             <ListMusic
-              color={showQueue ? COLORS.accent.magenta : COLORS.text.secondary}
+              color={COLORS.text.secondary}
               size={24}
             />
           </TouchableOpacity>
         </View>
 
-        {/* Up Next. Lyrics used to render here as a placeholder that only
-            ever showed the track title; it was removed rather than left as a
-            dead affordance. */}
-        {showQueue && (
-          <BlurView intensity={20} tint="dark" style={styles.lyricsSnippet}>
-            <View style={styles.queueHeader}>
-              <Text style={styles.lyricsTitle}>Up Next</Text>
-              <TouchableOpacity onPress={() => setShowQueue(false)}>
-                <X color={COLORS.text.secondary} size={16} />
-              </TouchableOpacity>
+        {/* Up Next Preview */}
+        {upcoming.length > 0 && (
+          <TouchableOpacity 
+            style={styles.upNextPreview}
+            onPress={() => (navigation as any).navigate('Queue')}
+            activeOpacity={0.8}
+          >
+            <View style={styles.upNextHeader}>
+              <Text style={styles.upNextLabel}>Up Next</Text>
+              <Text style={styles.upNextCount}>{upcoming.length} tracks</Text>
             </View>
-
-            {upcoming.length === 0 ? (
-              <Text style={styles.lyricsText}>Nothing queued.</Text>
-            ) : (
-              <ScrollView style={styles.queueScroll} nestedScrollEnabled>
-                {upcoming.map((track) => (
-                  <View key={track.id} style={styles.queueRow}>
-                    <TouchableOpacity
-                      style={styles.queueRowMain}
-                      onPress={() => jumpTo(track.id)}
-                    >
-                      <Text style={styles.queueTitle} numberOfLines={1}>{track.title}</Text>
-                      <Text style={styles.queueArtist} numberOfLines={1}>
-                        {track.artist.name}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => removeFromQueue(track.id)}>
-                      <X color={COLORS.text.muted} size={16} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </ScrollView>
-            )}
-          </BlurView>
+            <Text style={styles.upNextTitle} numberOfLines={1}>
+              {upcoming[0].title} <Text style={styles.upNextArtist}>• {upcoming[0].artist.name}</Text>
+            </Text>
+          </TouchableOpacity>
         )}
 
       </View>
@@ -362,26 +341,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: SIZES.xl,
     marginBottom: SIZES.xl,
   },
-  lyricsSnippet: {
-    borderRadius: SIZES.radius.md,
-    padding: SIZES.md,
-    backgroundColor: COLORS.glass,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
-    overflow: 'hidden',
-  },
-  lyricsTitle: {
-    fontFamily: FONTS.medium,
-    fontSize: 14,
-    color: COLORS.text.primary,
-    marginBottom: SIZES.xs,
-  },
-  lyricsText: {
-    fontFamily: FONTS.regular,
-    fontSize: 16,
-    color: COLORS.text.secondary,
-    lineHeight: 24,
-  },
   errorBanner: {
     backgroundColor: COLORS.accent.redGlow,
     borderRadius: SIZES.radius.sm,
@@ -401,33 +360,37 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     marginTop: 2,
   },
-  queueHeader: {
+  upNextPreview: {
+    backgroundColor: COLORS.surfaceRaised,
+    borderRadius: SIZES.radius.md,
+    padding: SIZES.sm,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+  },
+  upNextHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: SIZES.xs,
+    marginBottom: 4,
   },
-  queueScroll: {
-    maxHeight: 120,
+  upNextLabel: {
+    fontFamily: FONTS.medium,
+    fontSize: 12,
+    color: COLORS.text.secondary,
   },
-  queueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
+  upNextCount: {
+    fontFamily: FONTS.regular,
+    fontSize: 11,
+    color: COLORS.text.muted,
   },
-  queueRowMain: {
-    flex: 1,
-    paddingRight: SIZES.sm,
-  },
-  queueTitle: {
+  upNextTitle: {
     fontFamily: FONTS.medium,
     fontSize: 14,
     color: COLORS.text.primary,
   },
-  queueArtist: {
+  upNextArtist: {
     fontFamily: FONTS.regular,
-    fontSize: 12,
+    fontSize: 13,
     color: COLORS.text.secondary,
-    marginTop: 1,
   },
 });

@@ -318,6 +318,7 @@ export default function LibraryScreen() {
           isPlaying={isPlaying}
           isLoading={isLoading}
           onPlayPause={togglePlayPause}
+          onNext={next}
           onPress={() => navigation.navigate('NowPlaying')}
         />
       )}

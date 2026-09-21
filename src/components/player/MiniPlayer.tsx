@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, Image, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
-import { Play, Pause, MonitorSpeaker } from 'lucide-react-native';
+import { Play, Pause, MonitorSpeaker, SkipForward } from 'lucide-react-native';
 import { Track } from '../../core/types';
 import { useProgress } from '../../hooks/usePlayer';
 import { PlaybackSourceSheet } from './PlaybackSourceSheet';
@@ -11,6 +11,7 @@ interface MiniPlayerProps {
   isPlaying: boolean;
   onPress: () => void;
   onPlayPause: () => void;
+  onNext?: () => void;
   tabBarHeight?: number;
   isLoading?: boolean;
 }
@@ -41,6 +42,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
   isPlaying, 
   onPress, 
   onPlayPause,
+  onNext,
   tabBarHeight = Platform.OS === 'ios' ? 88 : 68,
   isLoading = false
 }) => {
@@ -68,10 +70,22 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
           </View>
 
           <View style={styles.controls}>
-            <TouchableOpacity style={styles.iconButton} onPress={() => setShowSource(true)}>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                setShowSource(true);
+              }}
+            >
                <MonitorSpeaker color={COLORS.text.secondary} size={20} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.playButton} onPress={onPlayPause}>
+            <TouchableOpacity
+              style={styles.playButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                onPlayPause();
+              }}
+            >
               {isLoading ? (
                 <ActivityIndicator size="small" color={COLORS.text.primary} />
               ) : isPlaying ? (
@@ -80,6 +94,17 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
                 <Play color={COLORS.text.primary} size={24} fill={COLORS.text.primary} />
               )}
             </TouchableOpacity>
+            {onNext && (
+              <TouchableOpacity
+                style={styles.iconButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onNext();
+                }}
+              >
+                <SkipForward color={COLORS.text.primary} size={20} fill={COLORS.text.primary} />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
         

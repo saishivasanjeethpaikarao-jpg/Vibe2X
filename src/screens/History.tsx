@@ -139,6 +139,7 @@ export default function HistoryScreen() {
           isPlaying={isPlaying}
           isLoading={isLoading}
           onPlayPause={togglePlayPause}
+          onNext={next}
           onPress={() => navigation.navigate('NowPlaying' as never)}
         />
       )}

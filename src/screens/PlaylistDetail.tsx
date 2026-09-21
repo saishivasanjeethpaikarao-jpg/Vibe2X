@@ -201,6 +201,7 @@ export default function PlaylistDetailScreen() {
           isPlaying={isPlaying}
           isLoading={isLoading}
           onPlayPause={togglePlayPause}
+          onNext={next}
           onPress={() => navigation.navigate('NowPlaying' as never)}
         />
       )}

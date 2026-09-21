@@ -265,8 +265,16 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     if (!settings.autoplayRelated || !last) return;
 
+    // Capture the current load so we can bail if the user picks new music
+    // while the network request is in flight.
+    const id = loadId.current;
+
     try {
       const related = await MusicService.getRelated(last);
+
+      // Context changed while we were fetching — discard these suggestions.
+      if (loadId.current !== id) return;
+
       const fresh = related.filter(
         (t) => !queueRef.current.items.some((q) => q.id === t.id)
       );
@@ -443,9 +451,15 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       return;
     }
 
-    queueRef.current.previous();
+    const prevTrack = queueRef.current.previous();
     bumpQueue();
     persistQueue();
+
+    if (!prevTrack) {
+      // First track, no repeat: just restart from the beginning.
+      void playbackEngine.seekTo(0);
+      return;
+    }
     void loadCurrent({ autoPlay: true });
   }, [bumpQueue, loadCurrent, persistQueue]);
 
@@ -533,7 +547,13 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const reorderQueue = useCallback(
     (from: number, to: number) => {
-      queueRef.current.reorder(from, to);
+      // UI indices are relative to `upcoming` (starts after the current track).
+      // Queue.reorder expects indices into the full `order` array, so we offset
+      // by (total - upcoming.length) which equals (position + 1).
+      const upcomingLen = queueRef.current.upcoming.length;
+      const totalLen = queueRef.current.length;
+      const offset = totalLen - upcomingLen;
+      queueRef.current.reorder(from + offset, to + offset);
       bumpQueue();
       persistQueue();
     },
