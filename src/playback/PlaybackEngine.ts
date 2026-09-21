@@ -306,18 +306,6 @@ export class PlaybackEngine {
 
     this.lockScreenTrack = track;
     this.lockScreenSynced = false;
-
-    const metadata = this.metadataFor(track);
-
-    try {
-      this.player?.setActiveForLockScreen(true, metadata, {
-        showSeekForward: true,
-        showSeekBackward: true,
-      });
-      this.lockScreenActive = true;
-    } catch {
-      // Lock screen controls are optional; never block playback on them.
-    }
   }
 
   private metadataFor(track: Track) {
@@ -341,7 +329,7 @@ export class PlaybackEngine {
    */
   private syncLockScreenOnce(): void {
     if (Platform.OS === 'web') return;
-    if (this.lockScreenSynced || !this.lockScreenActive) return;
+    if (this.lockScreenSynced) return;
 
     const track = this.lockScreenTrack;
     if (!track) return;
@@ -356,6 +344,7 @@ export class PlaybackEngine {
         showSeekForward: true,
         showSeekBackward: true,
       });
+      this.lockScreenActive = true;
     } catch {
       /* best effort */
     }
