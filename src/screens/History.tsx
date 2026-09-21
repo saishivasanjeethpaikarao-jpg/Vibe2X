@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+﻿import React, { useCallback, useMemo, useState } from 'react';
 import { SectionList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
@@ -58,7 +58,7 @@ function groupByDay(entries: HistoryEntry[]): Section[] {
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { playTrack, currentTrack, isPlaying, isLoading, togglePlayPause, next } = usePlayer();
+  const { playTrack, currentTrack, isPlaying, isLoading, togglePlayPause, next, addToQueue } = usePlayer();
   const { history, clearHistory } = useLibrary();
 
   const sections = useMemo(() => groupByDay(history), [history]);
@@ -74,7 +74,7 @@ export default function HistoryScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: HistoryEntry }) => (
-      <TrackRow
+      <TrackRow onSwipeRight={addToQueue}
         track={item.track}
         onPress={onPlay}
         onMorePress={setAddingTrack}

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+﻿import React, { useCallback, useMemo, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -11,11 +11,12 @@ import {
   Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, X, Trash2 } from 'lucide-react-native';
+import { Plus, X, Trash2, Pin } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Pill } from '../components/common/Pill';
 import { GlassCard } from '../components/common/GlassCard';
 import { TrackRow } from '../components/lists/TrackRow';
+import { MusicService } from '../services/MusicService';
 import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { Playlist, Track } from '../core/types';
@@ -29,7 +30,7 @@ type LibraryStackParams = {
   NowPlaying: undefined;
 };
 
-const FILTERS = ['Playlists', 'Artists', 'Albums', 'Downloaded'];
+const FILTERS = ['Playlists', 'Artists', 'Albums', 'Local Files'];
 
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
@@ -46,6 +47,7 @@ export default function LibraryScreen() {
     importError,
     clearImportError,
     deletePlaylist,
+    togglePinPlaylist,
     touchPlaylist,
     createPlaylist,
   } = useLibrary();
@@ -53,6 +55,22 @@ export default function LibraryScreen() {
   const [showImport, setShowImport] = useState(false);
   const [importUrl, setImportUrl] = useState('');
   const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [localTracks, setLocalTracks] = useState<Track[]>([]);
+  const [isScanning, setIsScanning] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
+
+  const scanLocalMusic = async () => {
+    setIsScanning(true);
+    try {
+      const tracks = await MusicService.getLocalTracks();
+      setLocalTracks(tracks);
+      setHasScanned(true);
+    } catch (e) {
+      console.warn(e);
+    } finally {
+      setIsScanning(false);
+    }
+  };
   /** Playlists have their own page, so a tap navigates rather than expanding. */
   const openPlaylist = useCallback(
     (playlist: Playlist) => {
@@ -66,8 +84,12 @@ export default function LibraryScreen() {
   const allPlaylists = useMemo<Playlist[]>(
     () => [
       likedPlaylist,
-      // Most recently opened or changed first, so recents read as playlists.
-      ...[...playlists].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0)),
+      // Pinned first, then most recently opened or changed
+      ...[...playlists].sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+      }),
     ],
     [likedPlaylist, playlists]
   );
@@ -253,17 +275,27 @@ export default function LibraryScreen() {
                     <Text style={styles.playlistSubtitle}>
                       {playlist.id === 'liked'
                         ? `${playlist.tracks.length} songs`
-                        : `Playlist • ${playlist.creator} • ${playlist.tracks.length}`}
+                        : `Playlist â€¢ ${playlist.creator} â€¢ ${playlist.tracks.length}`}
                     </Text>
                   </View>
-                  {playlist.id !== 'liked' && (
-                    <TouchableOpacity
-                      style={styles.deleteButton}
-                      onPress={() => deletePlaylist(playlist.id)}
-                    >
-                      <Trash2 color={COLORS.text.muted} size={18} />
-                    </TouchableOpacity>
-                  )}
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    {playlist.id !== 'liked' && (
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => togglePinPlaylist(playlist.id)}
+                      >
+                        <Pin color={playlist.pinned ? COLORS.accent.magenta : COLORS.text.muted} size={18} />
+                      </TouchableOpacity>
+                    )}
+                    {playlist.id !== 'liked' && (
+                      <TouchableOpacity
+                        style={styles.deleteButton}
+                        onPress={() => deletePlaylist(playlist.id)}
+                      >
+                        <Trash2 color={COLORS.text.muted} size={18} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </TouchableOpacity>
               </View>
             ))}
@@ -276,7 +308,7 @@ export default function LibraryScreen() {
                   <View style={styles.playlistInfo}>
                     <Text style={styles.playlistTitle}>{artist.name}</Text>
                     <Text style={styles.playlistSubtitle}>
-                      Artist • {artist.count} {artist.count === 1 ? 'song' : 'songs'}
+                      Artist â€¢ {artist.count} {artist.count === 1 ? 'song' : 'songs'}
                     </Text>
                   </View>
                 </View>
@@ -293,7 +325,7 @@ export default function LibraryScreen() {
                   <View style={styles.playlistInfo}>
                     <Text style={styles.playlistTitle}>{album.name}</Text>
                     <Text style={styles.playlistSubtitle}>
-                      Album • {album.artist}
+                      Album â€¢ {album.artist}
                     </Text>
                   </View>
                 </View>
@@ -301,11 +333,29 @@ export default function LibraryScreen() {
             ) : (
               <Text style={styles.emptyHint}>Albums appear here as you save music.</Text>
             ))}
-
-          {activeFilter === 'Downloaded' && (
-            <Text style={styles.emptyHint}>
-              VIBE²X streams on demand and doesn't store audio offline.
-            </Text>
+          {activeFilter === 'Local Files' && (
+            <View>
+              <TouchableOpacity
+                style={{ padding: 16, backgroundColor: '#333', borderRadius: 8, margin: 16, alignItems: 'center' }}
+                onPress={scanLocalMusic}
+              >
+                <Text style={{ color: '#fff' }}>{isScanning ? 'Scanning...' : 'Scan Local Music'}</Text>
+              </TouchableOpacity>
+              {localTracks.length > 0 ? (
+                localTracks.map((track) => (
+                  <TrackRow
+                    key={track.id}
+                    track={track}
+                    onPress={() => playTrack(track, { tracks: localTracks, label: 'Local Music' })}
+                    isPlaying={currentTrack?.id === track.id && isPlaying}
+                    
+                    
+                  />
+                ))
+              ) : (
+                hasScanned ? <Text style={styles.emptyHint}>No local audio files found.</Text> : null
+              )}
+            </View>
           )}
         </View>
       </ScrollView>
@@ -315,7 +365,8 @@ export default function LibraryScreen() {
       {currentTrack && (
         <MiniPlayer
           track={currentTrack}
-          isPlaying={isPlaying}
+            isPlaying={isPlaying}
+          
           isLoading={isLoading}
           onPlayPause={togglePlayPause}
           onNext={next}
@@ -460,3 +511,4 @@ const styles = StyleSheet.create({
     marginTop: SIZES.sm,
   },
 });
+

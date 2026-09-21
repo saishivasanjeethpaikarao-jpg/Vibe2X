@@ -36,6 +36,7 @@ type LibraryContextType = {
   createPlaylist: (name: string, tracks?: Track[]) => Playlist;
   deletePlaylist: (id: string) => void;
   renamePlaylist: (id: string, name: string) => void;
+  togglePinPlaylist: (id: string) => void;
   addToPlaylist: (playlistId: string, tracks: Track | Track[]) => void;
   removeFromPlaylist: (playlistId: string, trackId: string) => void;
 
@@ -162,6 +163,14 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     [sync]
   );
 
+  const togglePinPlaylist = useCallback(
+    (id: string) => {
+      LibraryService.togglePinPlaylist(id);
+      sync();
+    },
+    [sync]
+  );
+
   const renamePlaylist = useCallback(
     (id: string, name: string) => {
       LibraryService.updatePlaylist(id, { name });
@@ -270,6 +279,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       toggleLike,
       createPlaylist,
       deletePlaylist,
+      togglePinPlaylist,
       renamePlaylist,
       addToPlaylist,
       removeFromPlaylist,
@@ -296,6 +306,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       toggleLike,
       createPlaylist,
       deletePlaylist,
+      togglePinPlaylist,
       renamePlaylist,
       addToPlaylist,
       removeFromPlaylist,

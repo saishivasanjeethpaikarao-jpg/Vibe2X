@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+﻿import React, { useCallback, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { MoreVertical } from 'lucide-react-native';
+import { MoreVertical, ListPlus } from 'lucide-react-native';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Track } from '../../core/types';
 import { COLORS, SIZES, FONTS } from '../../constants/theme';
 
@@ -19,6 +20,7 @@ interface TrackRowProps {
   /** Shown while the row's target is being expanded or resolved. */
   isLoading?: boolean;
   onMorePress?: (track: Track) => void;
+  onSwipeRight?: (track: Track) => void;
 }
 
 const TrackRowComponent: React.FC<TrackRowProps> = ({
@@ -27,14 +29,29 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
   isPlaying,
   isLoading,
   onMorePress,
+  onSwipeRight,
 }) => {
   const handlePress = useCallback(() => onPress(track), [onPress, track]);
   const handleMorePress = useCallback(
     () => onMorePress?.(track),
     [onMorePress, track]
   );
+  const ReanimatedSwipeableRef = useRef<any>(null);
 
-  return (
+  const renderLeftActions = () => (
+    <View style={styles.swipeAction}>
+      <ListPlus color={COLORS.text.primary} size={24} />
+    </View>
+  );
+
+  const onSwipeableOpen = (direction: 'left' | 'right') => {
+    if (direction === 'left' && onSwipeRight) {
+      onSwipeRight(track);
+      ReanimatedSwipeableRef.current?.close();
+    }
+  };
+
+  const row = (
     <TouchableOpacity
       style={styles.container}
       activeOpacity={0.7}
@@ -62,6 +79,19 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
       )}
     </TouchableOpacity>
   );
+
+  return onSwipeRight ? (
+    <ReanimatedSwipeable
+      ref={ReanimatedSwipeableRef}
+      renderLeftActions={renderLeftActions}
+      onSwipeableOpen={onSwipeableOpen}
+      overshootLeft={false}
+    >
+      {row}
+    </ReanimatedSwipeable>
+  ) : (
+    row
+  );
 };
 
 /**
@@ -73,6 +103,11 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
 export const TrackRow = React.memo(TrackRowComponent);
 
 const styles = StyleSheet.create({
+  swipeAction: {
+    backgroundColor: COLORS.accent.violet,
+    justifyContent: 'center',
+    paddingHorizontal: SIZES.xl,
+  },
   container: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -10,11 +10,12 @@ import {
   ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, Heart, Play, Pause, SkipBack, SkipForward, Repeat, Repeat1, Shuffle, RotateCcw, RotateCw, MonitorSpeaker, Share, ListMusic, ListPlus, X } from 'lucide-react-native';
+import { ChevronDown, Heart, Play, Pause, SkipBack, SkipForward, Repeat, Repeat1, Shuffle, RotateCcw, RotateCw, MonitorSpeaker, Timer, ListMusic, ListPlus, X } from 'lucide-react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { PlaybackSourceSheet } from '../components/player/PlaybackSourceSheet';
+import { SleepTimerSheet } from '../components/player/SleepTimerSheet';
 import { SeekBar } from '../components/player/SeekBar';
 import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
 import { Track } from '../core/types';
@@ -65,10 +66,13 @@ export default function NowPlayingScreen() {
     jumpTo,
     removeFromQueue,
     canPlayCurrent,
+    sleepTimerExpiration,
+    setSleepTimer,
   } = usePlayer();
 
   const { isLiked, toggleLike } = useLibrary();
   const [showSource, setShowSource] = useState(false);
+  const [showSleepTimer, setShowSleepTimer] = useState(false);
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
 
   // Gesture handling state
@@ -129,7 +133,10 @@ export default function NowPlayingScreen() {
         style={StyleSheet.absoluteFill}
       />
 
-      <View style={[styles.content, { paddingTop: insets.top, paddingBottom: insets.bottom + SIZES.md }]}>
+      <ScrollView 
+        contentContainerStyle={[styles.content, { paddingTop: insets.top, paddingBottom: insets.bottom + SIZES.md }]}
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* Header */}
         <View style={styles.header}>
@@ -237,8 +244,8 @@ export default function NowPlayingScreen() {
               size={24}
             />
           </TouchableOpacity>
-          <TouchableOpacity>
-            <Share color={COLORS.text.secondary} size={24} />
+          <TouchableOpacity onPress={() => setShowSleepTimer(true)}>
+            <Timer color={sleepTimerExpiration ? COLORS.accent.magenta : COLORS.text.secondary} size={24} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => (navigation as any).navigate('Queue')}>
             <ListMusic
@@ -265,11 +272,18 @@ export default function NowPlayingScreen() {
           </TouchableOpacity>
         )}
 
-      </View>
+        </ScrollView>
 
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
 
       <PlaybackSourceSheet visible={showSource} onClose={() => setShowSource(false)} />
+
+      <SleepTimerSheet
+        visible={showSleepTimer}
+        onClose={() => setShowSleepTimer(false)}
+        expiration={sleepTimerExpiration}
+        onSetTimer={setSleepTimer}
+      />
     </View>
   );
 }
@@ -280,7 +294,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
   },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: SIZES.lg,
     justifyContent: 'space-between',
   },

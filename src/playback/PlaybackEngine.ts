@@ -17,6 +17,7 @@ export type PlaybackStatus = {
   /** Seconds; 0 until the source reports one. */
   duration: number;
   volume: number;
+  sleepTimerExpiration: number | null;
 };
 
 export const IDLE_STATUS: PlaybackStatus = {
@@ -26,6 +27,7 @@ export const IDLE_STATUS: PlaybackStatus = {
   position: 0,
   duration: 0,
   volume: 1,
+  sleepTimerExpiration: null,
 };
 
 type EngineEvents = {
@@ -51,6 +53,7 @@ export class PlaybackEngine {
   private status: PlaybackStatus = { ...IDLE_STATUS };
   private currentTrackId: string | null = null;
   private desiredVolume = 1;
+  private sleepTimerExpirationTime: number | null = null;
 
   /** Guards against a stalled load leaving the UI spinning forever. */
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -113,6 +116,17 @@ export class PlaybackEngine {
     return player;
   }
 
+  setSleepTimer(minutes: number | null): void {
+    if (minutes === null) {
+      this.sleepTimerExpirationTime = null;
+    } else {
+      this.sleepTimerExpirationTime = Date.now() + minutes * 60000;
+    }
+    // Force a status emit so UI updates immediately
+    this.status.sleepTimerExpiration = this.sleepTimerExpirationTime;
+    this.listeners.onStatus?.(this.status);
+  }
+
   private handleStatus(s: any): void {
     const duration = Number.isFinite(s?.duration) && s.duration > 0 ? s.duration : 0;
     const position = Number.isFinite(s?.currentTime) ? Math.max(0, s.currentTime) : 0;
@@ -128,6 +142,12 @@ export class PlaybackEngine {
       this.listeners.onError?.(appError('playback_failed', String(s.error)));
       return;
     }
+    
+    // Sleep Timer background check via native status ticks
+    if (this.sleepTimerExpirationTime && Date.now() >= this.sleepTimerExpirationTime) {
+      this.sleepTimerExpirationTime = null;
+      void this.pause();
+    }
 
     this.status = {
       isPlaying: Boolean(s?.playing),
@@ -136,6 +156,7 @@ export class PlaybackEngine {
       position,
       duration,
       volume: Number.isFinite(s?.volume) ? s.volume : this.desiredVolume,
+      sleepTimerExpiration: this.sleepTimerExpirationTime,
     };
 
     this.listeners.onStatus?.(this.status);

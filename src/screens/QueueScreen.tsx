@@ -9,11 +9,12 @@ import {
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, X, Music, Search } from 'lucide-react-native';
+import { ChevronDown, X, Music, Search, ListPlus } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Track } from '../core/types';
 import { usePlayer } from '../hooks/usePlayer';
+import { useLibrary } from '../hooks/useLibrary';
 import { useNavigation } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
@@ -33,6 +34,7 @@ import { GripVertical, Sparkles } from 'lucide-react-native';
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const { createPlaylist } = useLibrary();
   const {
     currentTrack,
     upcoming,
@@ -121,13 +123,26 @@ export default function QueueScreen() {
             </Text>
           </View>
           {upcoming.length > 0 ? (
-            <TouchableOpacity
-              style={styles.headerIcon}
-              onPress={clearQueue}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            >
-              <Text style={styles.clearText}>Clear</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <TouchableOpacity
+                style={[styles.headerIcon, { width: 32 }]}
+                onPress={() => {
+                  if (currentTrack) {
+                    createPlaylist(`Queue • ${new Date().toLocaleDateString()}`, [currentTrack, ...upcoming]);
+                  }
+                }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                <ListPlus color={COLORS.text.secondary} size={20} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.headerIcon, { width: 44 }]}
+                onPress={clearQueue}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              >
+                <Text style={styles.clearText}>Clear</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             <View style={styles.headerIcon} />
           )}

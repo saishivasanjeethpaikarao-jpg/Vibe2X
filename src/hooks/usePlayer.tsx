@@ -37,6 +37,8 @@ type PlayerContextType = {
   duration: number;
   volume: number;
   setVolume: (v: number) => void;
+  sleepTimerExpiration: number | null;
+  setSleepTimer: (minutes: number | null) => void;
   seekTo: (seconds: number) => void;
   /** Jump relative to the current position. Negative rewinds. */
   seekBy: (deltaSeconds: number) => void;
@@ -109,6 +111,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [isReady, setIsReady] = useState(false);
   const [queueVersion, setQueueVersion] = useState(0);
   const [volume, setVolumeState] = useState(1);
+  const [sleepTimerExpiration, setSleepTimerExpiration] = useState<number | null>(null);
 
   /** Cancels an in-flight load when the user starts another one. */
   const loadAbort = useRef<AbortController | null>(null);
@@ -277,7 +280,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         getRecentTrackIds(12), // 12 hour repetition penalty window
       ]);
 
-      // Context changed while we were fetching — discard these suggestions.
+      // Context changed while we were fetching â€” discard these suggestions.
       if (loadId.current !== id) return;
 
       // Filter out suppressed tracks and already queued tracks
@@ -505,6 +508,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     LibraryService.updateSettings({ volume: clamped });
   }, []);
 
+  const setSleepTimer = useCallback((minutes: number | null) => {
+    playbackEngine.setSleepTimer(minutes);
+  }, []);
+
   const retry = useCallback(() => {
     const attempt = lastAttempt.current;
     if (!attempt) return;
@@ -644,6 +651,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       duration,
       volume,
       setVolume,
+      sleepTimerExpiration: status.sleepTimerExpiration || null,
+      setSleepTimer,
       seekTo,
       seekBy,
 
@@ -683,6 +692,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       duration,
       volume,
       setVolume,
+      status.sleepTimerExpiration,
+      setSleepTimer,
       seekTo,
       seekBy,
       next,
@@ -722,3 +733,4 @@ export const usePlayer = () => {
 
 /** Subscribe to playback position without re-rendering on every other change. */
 export const useProgress = () => useContext(ProgressContext);
+

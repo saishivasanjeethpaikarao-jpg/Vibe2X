@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+﻿import React, { useCallback, useMemo, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -44,7 +44,7 @@ export default function SearchScreen() {
     hasResults,
   } = useSearch();
 
-  const { playTrack, currentTrack, isPlaying, togglePlayPause, next } = usePlayer();
+  const { playTrack, currentTrack, isPlaying, togglePlayPause, next, addToQueue } = usePlayer();
   const [expandingId, setExpandingId] = useState<string | null>(null);
 
   const isBrowsing = query.trim().length === 0;
@@ -56,7 +56,7 @@ export default function SearchScreen() {
       Keyboard.dismiss();
       playTrack(track, {
         tracks: results.tracks,
-        label: `Search • ${results.query}`,
+        label: `Search â€¢ ${results.query}`,
       });
     },
     [playTrack, results.tracks, results.query]
@@ -107,7 +107,7 @@ export default function SearchScreen() {
   );
 
   // Synthetic Track objects for non-track results. Memoized because a new
-  // object literal per render would defeat TrackRow’s memoization.
+  // object literal per render would defeat TrackRowâ€™s memoization.
   const artistRows = useMemo(
     () =>
       results.artists.map((artist) => ({
@@ -129,7 +129,7 @@ export default function SearchScreen() {
         title: album.title,
         artist: {
           id: album.id,
-          name: album.year ? `${album.artist} • ${album.year}` : album.artist,
+          name: album.year ? `${album.artist} â€¢ ${album.year}` : album.artist,
         },
         albumImageUrl: album.coverImageUrl,
         duration: 0,
@@ -216,7 +216,7 @@ export default function SearchScreen() {
 
         {isBrowsing ? (
           <>
-            <Text style={styles.sectionTitle}>Browse VIBE²X</Text>
+            <Text style={styles.sectionTitle}>Browse VIBEÂ²X</Text>
 
             <View style={styles.categoriesGrid}>
               {BROWSE_CATEGORIES.map((category) => (
@@ -264,7 +264,7 @@ export default function SearchScreen() {
                 <Text style={styles.sectionTitle}>Songs</Text>
                 <View style={styles.resultsList}>
                   {results.tracks.map((track) => (
-                    <TrackRow
+                    <TrackRow onSwipeRight={addToQueue}
                       key={track.id}
                       track={track}
                       onPress={onPlayTrack}
@@ -281,7 +281,7 @@ export default function SearchScreen() {
                 <Text style={styles.sectionTitle}>Artists</Text>
                 <View style={styles.resultsList}>
                   {artistRows.map((row) => (
-                    <TrackRow
+                    <TrackRow onSwipeRight={addToQueue}
                       key={row.id}
                       track={row}
                       onPress={openArtistRow}
@@ -297,7 +297,7 @@ export default function SearchScreen() {
                 <Text style={styles.sectionTitle}>Albums</Text>
                 <View style={styles.resultsList}>
                   {albumRows.map((row) => (
-                    <TrackRow
+                    <TrackRow onSwipeRight={addToQueue}
                       key={row.id}
                       track={row}
                       onPress={openAlbumRow}
@@ -313,7 +313,7 @@ export default function SearchScreen() {
                 <Text style={styles.sectionTitle}>Playlists</Text>
                 <View style={styles.resultsList}>
                   {playlistRows.map((row) => (
-                    <TrackRow
+                    <TrackRow onSwipeRight={addToQueue}
                       key={row.id}
                       track={row}
                       onPress={openPlaylistRow}

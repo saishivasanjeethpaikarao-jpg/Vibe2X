@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -48,6 +48,7 @@ export default function HomeScreen() {
     togglePlayPause,
     playTrack,
     next,
+    addToQueue,
   } = usePlayer();
   const { recentlyPlayed, liked, profile } = useLibrary();
 
@@ -274,6 +275,7 @@ export default function HomeScreen() {
                 track={track}
                 onPress={handleTrackPress}
                 onMorePress={setAddingTrack}
+                  onSwipeRight={addToQueue}
                 isPlaying={currentTrack?.id === track.id && isPlaying}
               />
             ))

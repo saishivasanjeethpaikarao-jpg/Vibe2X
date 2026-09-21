@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+﻿import React, { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -87,7 +87,7 @@ export default function PlaylistDetailScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: Track }) => (
-      <TrackRow
+      <TrackRow onSwipeRight={addToQueue}
         track={item}
         onPress={onTrackPress}
         onMorePress={setAddingTrack}
@@ -122,7 +122,7 @@ export default function PlaylistDetailScreen() {
 
       <Text style={styles.title} numberOfLines={2}>{playlist.name}</Text>
       <Text style={styles.meta} numberOfLines={1}>
-        {playlist.creator ? `${playlist.creator} • ` : ''}
+        {playlist.creator ? `${playlist.creator} â€¢ ` : ''}
         {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
       </Text>
 

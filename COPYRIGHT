@@ -1,5 +1,6 @@
-NØTE — a music player for Android
-Copyright (C) 2026 Sanyam Jain
+﻿Vibe2X (Forked from NØTE) - a music player for Android
+Copyright (C) 2026 saishivasanjeethpaikarao-jpg
+Copyright (C) 2026 Sanyam Jain (Original NØTE)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -14,6 +15,6 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-NØTE links the NewPipe Extractor (GPL-3.0-or-later, (c) Team NewPipe),
+Vibe2X links the NewPipe Extractor (GPL-3.0-or-later, (c) Team NewPipe),
 which is why this program is distributed under the same terms.
 See THIRD_PARTY_NOTICES.md.

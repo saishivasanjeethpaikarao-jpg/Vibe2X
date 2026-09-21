@@ -1,4 +1,6 @@
-import React, { useCallback, useState } from 'react';
+﻿import React, { useCallback, useState } from 'react';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import {
   Keyboard,
   Linking,
@@ -16,6 +18,7 @@ import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Gender } from '../services/LibraryService';
 import { useLibrary } from '../hooks/useLibrary';
+import { LibraryService } from '../services/LibraryService';
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: 'male', label: 'Male' },
@@ -30,7 +33,7 @@ const NEWPIPE_URL = 'https://github.com/TeamNewPipe/NewPipeExtractor';
 /**
  * Settings, profile and the legal notices.
  *
- * VIBE²X is GPL-3.0-or-later because it links the NewPipe Extractor, and that
+ * VIBEÃ‚Â²X is GPL-3.0-or-later because it links the NewPipe Extractor, and that
  * licence expects the terms and the upstream attribution to be discoverable
  * from the app itself rather than only in the repository. This screen is where
  * they live.
@@ -44,6 +47,17 @@ export default function SettingsScreen() {
 
   const version =
     Constants.expoConfig?.version ?? Constants.manifest2?.extra?.expoClient?.version ?? '1.0.0';
+
+  const handleExport = async () => {
+    try {
+      const data = LibraryService.getBackup();
+      const uri = FileSystem.documentDirectory + 'vibe2x_backup.json';
+      await FileSystem.writeAsStringAsync(uri, data);
+      await Sharing.shareAsync(uri, { mimeType: 'application/json' });
+    } catch (e) {
+      console.warn('Export failed', e);
+    }
+  };
 
   const commitName = useCallback(() => {
     const trimmed = name.trim();
@@ -134,6 +148,12 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* ---- Data ---- */}
+        <Text style={styles.sectionLabel}>DATA</Text>
+        <View style={styles.card}>
+          <LinkRow label="Export backup" onPress={handleExport} />
+        </View>
+
         {/* ---- About ---- */}
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <View style={styles.card}>
@@ -147,9 +167,9 @@ export default function SettingsScreen() {
         {/* ---- Legal ---- */}
         <Text style={styles.sectionLabel}>LICENCE</Text>
         <View style={styles.card}>
-          <Text style={styles.legalTitle}>VIBE²X (fork of NØTE)</Text>
+          <Text style={styles.legalTitle}>VIBEÃ‚Â²X (fork of NÃƒËœTE)</Text>
           <Text style={styles.legalBody}>
-            Original Copyright © 2026 Sanyam Jain.{'\n\n'}
+            Original Copyright Ã‚Â© 2026 Sanyam Jain.{'\n\n'}
             This program is free software: you can redistribute it and/or modify it
             under the terms of the GNU General Public License as published by the
             Free Software Foundation, either version 3 of the License, or (at your
@@ -165,10 +185,10 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <Text style={styles.legalTitle}>NewPipe Extractor</Text>
           <Text style={styles.legalBody}>
-            Copyright © Team NewPipe and contributors, licensed GPL-3.0-or-later.
+            Copyright Ã‚Â© Team NewPipe and contributors, licensed GPL-3.0-or-later.
             {'\n\n'}
-            VIBE²X uses it, unmodified, to resolve playable audio. No NewPipe source
-            is included in this app, and linking it is why VIBE²X carries the same
+            VIBEÃ‚Â²X uses it, unmodified, to resolve playable audio. No NewPipe source
+            is included in this app, and linking it is why VIBEÃ‚Â²X carries the same
             licence.
           </Text>
           <LinkRow label="NewPipeExtractor on GitHub" onPress={() => open(NEWPIPE_URL)} />

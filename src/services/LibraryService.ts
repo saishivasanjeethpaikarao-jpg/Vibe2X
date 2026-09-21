@@ -1,4 +1,4 @@
-import {
+﻿import {
   readJson,
   writeJson,
   writeJsonDebounced,
@@ -63,6 +63,16 @@ class LibraryServiceImpl {
   private playlists: Playlist[] = [];
   private recents: Track[] = [];
   private history: HistoryEntry[] = [];
+
+  getBackup(): string {
+    return JSON.stringify({
+      liked: this.liked,
+      playlists: this.playlists,
+      recents: this.recents,
+      history: this.history,
+      settings: this.settings,
+    });
+  }
 
   /**
    * Notified whenever library data changes from OUTSIDE the React hook --
@@ -233,6 +243,12 @@ class LibraryServiceImpl {
       p.id === id ? { ...p, ...patch, updatedAt: Date.now() } : p
     );
     this.persistPlaylists();
+  }
+
+  togglePinPlaylist(id: string): void {
+    const playlist = this.getPlaylist(id);
+    if (!playlist) return;
+    this.updatePlaylist(id, { pinned: !playlist.pinned });
   }
 
   deletePlaylist(id: string): void {

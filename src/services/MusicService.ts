@@ -1,4 +1,4 @@
-import { metadataCache } from '../core/cache';
+﻿import { metadataCache } from '../core/cache';
 import { appError, toAppError } from '../core/errors';
 import {
   emptySearchResults,
@@ -9,9 +9,11 @@ import {
 import { PlaylistPage, providers } from '../providers/TrackResolver';
 import { youtubeResolver } from '../providers/youtube/YouTubeResolver';
 import { streamResolver } from '../providers/stream/StreamResolver';
+import { localResolver, fetchLocalTracks } from '../providers/local/LocalResolver';
 
 // Register the providers the app ships with. Adding another is one line.
 providers.register(youtubeResolver, true);
+providers.register(localResolver, false);
 
 /**
  * The single entry point the UI uses for anything music-related.
@@ -44,6 +46,8 @@ class MusicServiceImpl {
     if (!provider.getSuggestions) return [];
     return provider.getSuggestions(input, signal);
   }
+
+  async getLocalTracks(): Promise<Track[]> { return fetchLocalTracks(); }
 
   async getMetadata(track: Track, signal?: AbortSignal): Promise<Track> {
     return providers.forTrack(track).getMetadata(track.sourceId, signal);

@@ -5,7 +5,7 @@
  * ProviderAdapter layer ever sees provider-specific data.
  */
 
-export type ProviderId = 'youtube';
+export type ProviderId = 'youtube' | 'local';
 
 export type Artist = {
   id: string;
@@ -79,6 +79,8 @@ export type Playlist = {
   source?: { provider: ProviderId; browseId: string };
   createdAt: number;
   updatedAt: number;
+  /** Whether the playlist is pinned to the top of the user's library. */
+  pinned?: boolean;
 };
 
 export type SearchFilter = 'All' | 'Songs' | 'Artists' | 'Albums' | 'Playlists';
