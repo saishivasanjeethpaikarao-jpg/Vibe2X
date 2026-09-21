@@ -310,12 +310,6 @@ export class PlaybackEngine {
     const metadata = this.metadataFor(track);
 
     try {
-      if (this.lockScreenActive) {
-        // Live session: swap metadata in place, keeping position/duration.
-        this.player?.updateLockScreenMetadata(metadata);
-        return;
-      }
-
       this.player?.setActiveForLockScreen(true, metadata, {
         showSeekForward: true,
         showSeekBackward: true,
@@ -354,7 +348,14 @@ export class PlaybackEngine {
 
     this.lockScreenSynced = true;
     try {
-      this.player?.updateLockScreenMetadata(this.metadataFor(track));
+      // Re-asserting using setActiveForLockScreen instead of updateLockScreenMetadata
+      // ensures expo-audio caches the metadata internally. If we use updateLockScreenMetadata,
+      // expo-audio's native module drops it from cache, and the next time the user pauses
+      // or seeks from the lockscreen, the session goes blank.
+      this.player?.setActiveForLockScreen(true, this.metadataFor(track), {
+        showSeekForward: true,
+        showSeekBackward: true,
+      });
     } catch {
       /* best effort */
     }
