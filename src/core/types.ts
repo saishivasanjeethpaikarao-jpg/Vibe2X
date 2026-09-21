@@ -32,6 +32,7 @@ export type Track = {
   album?: string;
   explicit?: boolean;
   isVideo?: boolean; // a music video rather than an official audio track
+  isAutoSuggested?: boolean; // track was automatically added by the player
 };
 
 export type Album = {

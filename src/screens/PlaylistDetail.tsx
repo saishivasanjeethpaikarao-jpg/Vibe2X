@@ -45,6 +45,7 @@ export default function PlaylistDetailScreen() {
     togglePlayPause,
     shuffle,
     toggleShuffle,
+    next,
   } = usePlayer();
 
   /** Track whose "add to playlist" sheet is open. */

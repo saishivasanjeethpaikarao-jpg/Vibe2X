@@ -58,7 +58,7 @@ function groupByDay(entries: HistoryEntry[]): Section[] {
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { playTrack, currentTrack, isPlaying, isLoading, togglePlayPause } = usePlayer();
+  const { playTrack, currentTrack, isPlaying, isLoading, togglePlayPause, next } = usePlayer();
   const { history, clearHistory } = useLibrary();
 
   const sections = useMemo(() => groupByDay(history), [history]);

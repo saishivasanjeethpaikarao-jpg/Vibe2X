@@ -275,9 +275,9 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       // Context changed while we were fetching — discard these suggestions.
       if (loadId.current !== id) return;
 
-      const fresh = related.filter(
-        (t) => !queueRef.current.items.some((q) => q.id === t.id)
-      );
+      const fresh = related
+        .filter((t) => !queueRef.current.items.some((q) => q.id === t.id))
+        .map((t) => ({ ...t, isAutoSuggested: true }));
       if (!fresh.length) return;
 
       queueRef.current.add(fresh.slice(0, 20));

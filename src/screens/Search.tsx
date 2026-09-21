@@ -44,7 +44,7 @@ export default function SearchScreen() {
     hasResults,
   } = useSearch();
 
-  const { playTrack, currentTrack, isPlaying, togglePlayPause } = usePlayer();
+  const { playTrack, currentTrack, isPlaying, togglePlayPause, next } = usePlayer();
   const [expandingId, setExpandingId] = useState<string | null>(null);
 
   const isBrowsing = query.trim().length === 0;

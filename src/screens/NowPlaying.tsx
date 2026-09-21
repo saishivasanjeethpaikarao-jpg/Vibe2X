@@ -33,6 +33,14 @@ const formatTime = (seconds: number): string => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  runOnJS,
+} from 'react-native-reanimated';
+import { PanGestureHandler, PanGestureHandlerGestureEvent, PanGestureHandlerStateChangeEvent } from 'react-native-gesture-handler';
+
 export default function NowPlayingScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -61,8 +69,45 @@ export default function NowPlayingScreen() {
 
   const { isLiked, toggleLike } = useLibrary();
   const [showSource, setShowSource] = useState(false);
-  /** Track whose "add to playlist" sheet is open. */
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
+
+  // Gesture handling state
+  const translateX = useSharedValue(0);
+
+  const onGestureEvent = (event: any) => {
+    translateX.value = event.nativeEvent.translationX;
+  };
+
+  const onGestureEnd = (event: any) => {
+    const { translationX, velocityX } = event.nativeEvent;
+    
+    // Swipe left (next)
+    if (translationX < -60 || velocityX < -500) {
+      translateX.value = withSpring(-width, { velocity: velocityX }, () => {
+        runOnJS(next)();
+        translateX.value = width; // Reset to the right for the next track sliding in
+        translateX.value = withSpring(0);
+      });
+    } 
+    // Swipe right (previous)
+    else if (translationX > 60 || velocityX > 500) {
+      translateX.value = withSpring(width, { velocity: velocityX }, () => {
+        runOnJS(previous)();
+        translateX.value = -width; // Reset to the left for the previous track sliding in
+        translateX.value = withSpring(0);
+      });
+    } 
+    // Snap back
+    else {
+      translateX.value = withSpring(0);
+    }
+  };
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateX: translateX.value }],
+    };
+  });
 
   if (!currentTrack) return null;
 
@@ -97,8 +142,6 @@ export default function NowPlayingScreen() {
               {queueContext || 'VIBE²X'}
             </Text>
           </View>
-          {/* Up Next already has its own toggle in the bottom row, so this
-              opens "add to playlist" rather than duplicating it. */}
           <TouchableOpacity
             style={styles.headerIcon}
             onPress={() => setAddingTrack(currentTrack)}
@@ -107,10 +150,12 @@ export default function NowPlayingScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Artwork */}
-        <View style={styles.artworkContainer}>
-          <Image source={{ uri: currentTrack.albumImageUrl }} style={styles.artwork} />
-        </View>
+        {/* Artwork with Swiping */}
+        <PanGestureHandler onGestureEvent={onGestureEvent} onEnded={onGestureEnd} activeOffsetX={[-10, 10]}>
+          <Animated.View style={[styles.artworkContainer, animatedStyle]}>
+            <Image source={{ uri: currentTrack.albumImageUrl }} style={styles.artwork} />
+          </Animated.View>
+        </PanGestureHandler>
 
         {/* Track Info */}
         <View style={styles.infoContainer}>

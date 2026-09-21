@@ -25,6 +25,11 @@ const { width } = Dimensions.get('window');
  * "Up Next" list with remove buttons. Navigated to from NowPlaying or
  * directly via the queue icon.
  */
+import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+// @ts-ignore
+import Swipeable from 'react-native-gesture-handler/Swipeable';
+import { GripVertical, Sparkles } from 'lucide-react-native';
+
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
@@ -35,30 +40,60 @@ export default function QueueScreen() {
     jumpTo,
     removeFromQueue,
     clearQueue,
+    reorderQueue,
   } = usePlayer();
 
-  const renderUpcomingTrack = ({ item, index }: { item: Track; index: number }) => (
-    <View style={styles.trackRow}>
+  const renderRightActions = (item: Track) => {
+    return (
       <TouchableOpacity
-        style={styles.trackRowMain}
-        activeOpacity={0.7}
-        onPress={() => jumpTo(item.id)}
-      >
-        <Image source={{ uri: item.albumImageUrl }} style={styles.trackThumb} />
-        <View style={styles.trackInfo}>
-          <Text style={styles.trackTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.trackArtist} numberOfLines={1}>{item.artist.name}</Text>
-        </View>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.removeButton}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        style={styles.deleteAction}
         onPress={() => removeFromQueue(item.id)}
       >
-        <X color={COLORS.text.muted} size={18} />
+        <Text style={styles.deleteActionText}>Remove</Text>
       </TouchableOpacity>
-    </View>
-  );
+    );
+  };
+
+  const renderUpcomingTrack = ({ item, drag, isActive, getIndex }: RenderItemParams<Track>) => {
+    const isAuto = item.isAutoSuggested;
+    return (
+      <Swipeable
+        renderRightActions={() => renderRightActions(item)}
+        overshootRight={false}
+        containerStyle={{ overflow: 'visible' }}
+      >
+        <View style={[
+          styles.trackRow,
+          isActive && styles.trackRowActive,
+          isAuto && styles.trackRowAuto,
+        ]}>
+          <TouchableOpacity
+            style={styles.trackRowMain}
+            activeOpacity={0.7}
+            onPress={() => jumpTo(item.id)}
+          >
+            <Image source={{ uri: item.albumImageUrl }} style={styles.trackThumb} />
+            <View style={styles.trackInfo}>
+              <View style={styles.titleRow}>
+                <Text style={styles.trackTitle} numberOfLines={1}>{item.title}</Text>
+                {isAuto && <Sparkles size={12} color={COLORS.accent.violet} style={{ marginLeft: 4 }} />}
+              </View>
+              <Text style={styles.trackArtist} numberOfLines={1}>{item.artist.name}</Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.dragHandle}
+            onLongPress={drag}
+            delayLongPress={150}
+            activeOpacity={0.7}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <GripVertical color={COLORS.text.muted} size={20} />
+          </TouchableOpacity>
+        </View>
+      </Swipeable>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -144,13 +179,16 @@ export default function QueueScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          <FlatList
+          <DraggableFlatList
             data={upcoming}
             renderItem={renderUpcomingTrack}
             keyExtractor={(item, index) => `${item.id}-${index}`}
             style={styles.list}
             contentContainerStyle={{ paddingBottom: insets.bottom + SIZES.xxl }}
             showsVerticalScrollIndicator={false}
+            onDragEnd={({ from, to }) => {
+              if (from !== to) reorderQueue(from, to);
+            }}
           />
         )}
       </View>
@@ -313,5 +351,37 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontSize: 14,
     color: COLORS.background,
+  },
+  deleteAction: {
+    backgroundColor: COLORS.accent.magenta,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    height: '100%',
+  },
+  deleteActionText: {
+    color: '#fff',
+    fontFamily: FONTS.medium,
+    fontSize: 13,
+  },
+  trackRowActive: {
+    backgroundColor: COLORS.surfaceRaised,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  trackRowAuto: {
+    opacity: 0.8,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  dragHandle: {
+    padding: SIZES.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

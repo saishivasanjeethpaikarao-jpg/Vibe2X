@@ -35,7 +35,7 @@ export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<LibraryStackParams>>();
   const [activeFilter, setActiveFilter] = useState('Playlists');
-  const { playTrack, currentTrack, isPlaying, togglePlayPause, isLoading } = usePlayer();
+  const { playTrack, currentTrack, isPlaying, togglePlayPause, isLoading, next } = usePlayer();
   const {
     playlists,
     likedPlaylist,

@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { StyleSheet, View, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { PlayerProvider } from './src/hooks/usePlayer';
 import { LibraryProvider } from './src/hooks/useLibrary';
@@ -22,18 +23,20 @@ export default function App() {
   }, []);
 
   return (
-    <SafeAreaProvider>
-      <LibraryProvider>
-        <PlayerProvider>
-          <View style={styles.webWrapper}>
-            <View style={styles.appContainer}>
-              <RootNavigator />
-              <StatusBar style="light" />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <LibraryProvider>
+          <PlayerProvider>
+            <View style={styles.webWrapper}>
+              <View style={styles.appContainer}>
+                <RootNavigator />
+                <StatusBar style="light" />
+              </View>
             </View>
-          </View>
-        </PlayerProvider>
-      </LibraryProvider>
-    </SafeAreaProvider>
+          </PlayerProvider>
+        </LibraryProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 

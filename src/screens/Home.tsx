@@ -41,7 +41,14 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const [activeCategory, setActiveCategory] = useState('Music');
-  const { playTrack, currentTrack, isPlaying, togglePlayPause, isLoading } = usePlayer();
+  const {
+    currentTrack,
+    isPlaying,
+    isLoading,
+    togglePlayPause,
+    playTrack,
+    next,
+  } = usePlayer();
   const { recentlyPlayed, liked, profile } = useLibrary();
 
   const [pendingAction, setPendingAction] = useState<string | null>(null);
