@@ -48,7 +48,8 @@
       "expo-asset",
       "./plugins/withCoreLibraryDesugaring",
       "./plugins/withAndroidAbis",
-      "./plugins/withReleaseSigning"
+      "./plugins/withReleaseSigning",
+      "expo-sqlite"
     ],
     "backgroundColor": "#050707"
   }

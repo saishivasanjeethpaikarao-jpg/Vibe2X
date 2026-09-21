@@ -2,11 +2,13 @@ import {
   readJson,
   writeJson,
   writeJsonDebounced,
+  removeKey,
   STORAGE_KEYS,
 } from '../core/storage';
 import { Playlist, Track } from '../core/types';
+import { getListenHistory, logPlay, clearListenHistory, batchLogPlays, HistoryEntry } from '../core/lie';
 
-/** Optional and never required: 'unspecified' is a first-class answer. */
+export { HistoryEntry };
 export type Gender = 'male' | 'female' | 'unspecified';
 
 export type UserProfile = {
@@ -40,20 +42,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   volume: 1,
   preferAudioOnly: true,
   autoplayRelated: true,
-};
-
-/**
- * One listening session: this track was actually played, at this moment.
- *
- * Repeated plays are separate entries on purpose -- this is a history, not a
- * "recently played" set, so playing something twice should show twice.
- */
-export type HistoryEntry = {
-  /** Unique per entry, so repeated plays of one track never collide as keys. */
-  id: string;
-  track: Track;
-  /** Epoch ms when the listen crossed the threshold. */
-  playedAt: number;
 };
 
 export type SavedPlaybackState = {
@@ -102,7 +90,7 @@ class LibraryServiceImpl {
 
   private async performLoad(): Promise<void> {
 
-    const [liked, playlists, recents, settings, listenHistory, history] = await Promise.all([
+    const [liked, playlists, recents, settings, listenHistoryRaw, searchHistoryRaw] = await Promise.all([
       readJson<Track[]>(STORAGE_KEYS.likedTracks, []),
       readJson<Playlist[]>(STORAGE_KEYS.playlists, []),
       readJson<Track[]>(STORAGE_KEYS.recentlyPlayed, []),
@@ -119,12 +107,19 @@ class LibraryServiceImpl {
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...stored,
-      // Nested, so merge it explicitly: a shallow spread would drop fields
-      // written by an older build.
       profile: { ...DEFAULT_PROFILE, ...(stored.profile ?? {}) },
     };
-    this.searchHistory = Array.isArray(history) ? history : [];
-    this.history = Array.isArray(listenHistory) ? listenHistory : [];
+    this.searchHistory = Array.isArray(searchHistoryRaw) ? searchHistoryRaw : [];
+    
+    // SQLite Migration for Listening Intelligence Engine (Phase 4)
+    const legacyHistory = Array.isArray(listenHistoryRaw) ? listenHistoryRaw : [];
+    if (legacyHistory.length > 0) {
+      await batchLogPlays(legacyHistory);
+      await removeKey(STORAGE_KEYS.history);
+    }
+    
+    // Load history from SQLite
+    this.history = await getListenHistory(100);
   }
 
   /** Subscribe to out-of-band changes. Returns an unsubscribe function. */
@@ -356,14 +351,15 @@ class LibraryServiceImpl {
     };
 
     this.history = [entry, ...this.history].slice(0, MAX_HISTORY);
-    writeJsonDebounced(STORAGE_KEYS.history, this.history, 1000);
+    logPlay(entry).catch(console.error); // Fire and forget logging
     this.notifyChanged();
     return entry;
   }
 
   clearHistory(): void {
     this.history = [];
-    writeJsonDebounced(STORAGE_KEYS.history, this.history, 200);
+    clearListenHistory().catch(console.error);
+    this.notifyChanged();
   }
 
   // ---- settings ---------------------------------------------------------
