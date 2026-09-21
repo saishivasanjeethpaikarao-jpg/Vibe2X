@@ -81,3 +81,40 @@ export async function clearListenHistory() {
   const database = await initDatabase();
   await database.runAsync('DELETE FROM plays');
 }
+export async function suppressTrack(trackId: string) {
+  const database = await initDatabase();
+  await database.runAsync(
+    'INSERT OR REPLACE INTO suppressed_tracks (track_id, timestamp) VALUES (?, ?)',
+    trackId,
+    Date.now()
+  );
+}
+
+export async function getSuppressedTrackIds(): Promise<Set<string>> {
+  const database = await initDatabase();
+  const rows = await database.getAllAsync<any>('SELECT track_id FROM suppressed_tracks');
+  return new Set(rows.map((r) => r.track_id));
+}
+
+export async function getVibeMemoryTracks(limit = 20): Promise<Track[]> {
+  const database = await initDatabase();
+  // Vibe Memory: Group history by track_id, rank by count, within the last 30 days
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const rows = await database.getAllAsync<any>(`
+    SELECT track_json, COUNT(*) as play_count 
+    FROM plays 
+    WHERE timestamp > ? 
+    GROUP BY track_id 
+    ORDER BY play_count DESC 
+    LIMIT ?
+  `, thirtyDaysAgo, limit);
+  
+  return rows.map(r => JSON.parse(r.track_json) as Track);
+}
+
+export async function getRecentTrackIds(hours = 12): Promise<Set<string>> {
+  const database = await initDatabase();
+  const cutoff = Date.now() - hours * 60 * 60 * 1000;
+  const rows = await database.getAllAsync<any>('SELECT track_id FROM plays WHERE timestamp > ?', cutoff);
+  return new Set(rows.map(r => r.track_id));
+}

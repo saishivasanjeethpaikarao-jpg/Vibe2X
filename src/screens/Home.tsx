@@ -138,7 +138,22 @@ export default function HomeScreen() {
   );
 
   /** Track whose "add to playlist" sheet is open. */
+  const [vibeMemory, setVibeMemory] = useState<Track[]>([]);
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getVibeMemoryTracks } = await import('../core/lie');
+        const mem = await getVibeMemoryTracks(10);
+        if (!cancelled) setVibeMemory(mem);
+      } catch (err) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -222,6 +237,25 @@ export default function HomeScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+        {vibeMemory.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Back to this vibe</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 32, marginHorizontal: -24, paddingHorizontal: 24 }}>
+              {vibeMemory.map((track) => (
+                <View key={track.id} style={{ width: 260, marginRight: 16 }}>
+                  <TrackRow
+                    track={track}
+                    onPress={() => playTrack(track, { tracks: vibeMemory, label: 'Back to this vibe' })}
+                    onMorePress={() => setAddingTrack(track)}
+                  />
+                </View>
+              ))}
+            </ScrollView>
+          </>
+        )}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>

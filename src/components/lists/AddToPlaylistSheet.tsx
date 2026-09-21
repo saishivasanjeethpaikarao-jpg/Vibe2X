@@ -10,10 +10,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Check, Heart, ListMusic, Plus, X } from 'lucide-react-native';
+import { Check, Heart, ListMusic, Plus, X, Ban } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../../constants/theme';
 import { Track } from '../../core/types';
 import { useLibrary } from '../../hooks/useLibrary';
+import { suppressTrack } from '../../core/lie';
 
 type Props = {
   /** The track being filed. Null closes the sheet. */
@@ -181,6 +182,22 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
             </View>
             <Text style={styles.rowLabel}>Liked Songs</Text>
             {liked && <Check color={COLORS.accent.magenta} size={18} />}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() => {
+              if (track) {
+                suppressTrack(track.id).catch(console.error);
+                close();
+              }
+            }}
+          >
+            <View style={styles.rowIcon}>
+              <Ban color={COLORS.text.primary} size={20} />
+            </View>
+            <Text style={styles.rowLabel}>Don't Play This</Text>
           </TouchableOpacity>
 
           {ordered.map((playlist) => {

@@ -18,6 +18,7 @@ import { preloader } from '../playback/preload';
 import { endpointSource } from '../providers/stream/StreamResolver';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
+import { getSuppressedTrackIds, getRecentTrackIds } from '../core/lie';
 
 type PlayerContextType = {
   // --- the original mock API, unchanged so existing screens keep working ---
@@ -270,14 +271,30 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const id = loadId.current;
 
     try {
-      const related = await MusicService.getRelated(last);
+      const [related, suppressed, recent] = await Promise.all([
+        MusicService.getRelated(last),
+        getSuppressedTrackIds(),
+        getRecentTrackIds(12), // 12 hour repetition penalty window
+      ]);
 
       // Context changed while we were fetching — discard these suggestions.
       if (loadId.current !== id) return;
 
-      const fresh = related
-        .filter((t) => !queueRef.current.items.some((q) => q.id === t.id))
-        .map((t) => ({ ...t, isAutoSuggested: true }));
+      // Filter out suppressed tracks and already queued tracks
+      let fresh = related.filter((t) => 
+        !queueRef.current.items.some((q) => q.id === t.id) && 
+        !suppressed.has(t.id)
+      );
+
+      // Score-based sorting (demote recently played tracks)
+      fresh.sort((a, b) => {
+        const aPenalty = recent.has(a.id) ? 1 : 0;
+        const bPenalty = recent.has(b.id) ? 1 : 0;
+        return aPenalty - bPenalty; 
+      });
+
+      fresh = fresh.map((t) => ({ ...t, isAutoSuggested: true }));
+      
       if (!fresh.length) return;
 
       queueRef.current.add(fresh.slice(0, 20));
@@ -289,8 +306,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     } catch {
       // Autoplay is a convenience; silence is the right failure mode.
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bumpQueue, loadCurrent, persistQueue]);
 
   // ---- startup: restore library, settings, queue and position -----------
 
