@@ -1,0 +1,181 @@
+name: Android standalone QA build
+
+on:
+  push:
+    branches:
+      - ui/liquid-vibe
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-qa:
+    name: Test and assemble standalone QA APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+          cache: npm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --reporter=dot
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Validate Expo dependencies
+        run: npx expo install --check
+
+      - name: Run Expo Doctor
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            npx expo-doctor@latest && exit 0
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          exit 1
+
+      - name: Generate clean Android project and ephemeral QA key
+        shell: bash
+        run: |
+          set -euo pipefail
+          qa_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$qa_password"
+
+          mkdir -p credentials
+          keytool -genkeypair \
+            -storetype PKCS12 \
+            -keystore credentials/liquid-vibe-qa.keystore \
+            -storepass "$qa_password" \
+            -keypass "$qa_password" \
+            -alias liquid-vibe-qa \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 30 \
+            -dname "CN=Vibe2X Liquid Vibe QA, OU=QA, O=Vibe2X, C=XX"
+
+          QA_STORE_PASSWORD="$qa_password" node <<'NODE'
+          const fs = require('fs');
+          fs.writeFileSync(
+            'credentials/keystore.json',
+            JSON.stringify({
+              keystorePath: 'credentials/liquid-vibe-qa.keystore',
+              storePassword: process.env.QA_STORE_PASSWORD,
+              keyAlias: 'liquid-vibe-qa',
+              keyPassword: process.env.QA_STORE_PASSWORD,
+            })
+          );
+          NODE
+
+          npx expo prebuild --platform android --clean --no-install
+
+      - name: Assemble embedded release-style QA APK
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleRelease
+
+      - name: Remove ephemeral signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -rf credentials
+          rm -f android/app/release.keystore
+
+      - name: Verify and stage standalone APK
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_apk="android/app/build/outputs/apk/release/app-release.apk"
+          output_dir="dist/qa"
+          output_apk="$output_dir/Vibe2X-LiquidVibe-QA.apk"
+
+          test -s "$source_apk"
+          mkdir -p "$output_dir"
+          cp "$source_apk" "$output_apk"
+
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          test -x "$aapt"
+
+          "$apksigner" verify --verbose --print-certs "$output_apk"
+          "$aapt" dump badging "$output_apk" > /tmp/vibe2x-badging.txt
+          grep -F "package: name='com.sanyamjain04.NOTE'" /tmp/vibe2x-badging.txt
+          grep -F "launchable-activity: name='com.sanyamjain04.NOTE.MainActivity'" /tmp/vibe2x-badging.txt
+          if grep -q '^application-debuggable' /tmp/vibe2x-badging.txt; then
+            echo "QA APK is unexpectedly debuggable" >&2
+            exit 1
+          fi
+
+          "$aapt" dump xmltree "$output_apk" AndroidManifest.xml > /tmp/vibe2x-manifest.txt
+          if grep -q 'DevLauncherActivity' /tmp/vibe2x-manifest.txt; then
+            echo "Expo development launcher activity is present" >&2
+            exit 1
+          fi
+
+          unzip -l "$output_apk" > /tmp/vibe2x-apk-entries.txt
+          grep -Eq 'assets/index\.android\.bundle$' /tmp/vibe2x-apk-entries.txt
+          unzip -p "$output_apk" assets/index.android.bundle > /tmp/index.android.bundle
+          bundle_magic="$(od -An -tx1 -N8 /tmp/index.android.bundle | tr -d ' \n')"
+          if [ "$bundle_magic" != "c61fbc03c103191f" ]; then
+            echo "Embedded bundle is not Hermes bytecode (magic: $bundle_magic)" >&2
+            exit 1
+          fi
+
+          if grep -Eiq '(^|/)(credentials|keystore\.json|[^/]*\.keystore|\.env($|\.))' /tmp/vibe2x-apk-entries.txt; then
+            echo "Signing or environment material was packaged into the APK" >&2
+            exit 1
+          fi
+
+          apk_size="$(stat -c%s "$output_apk")"
+          apk_sha256="$(sha256sum "$output_apk" | cut -d' ' -f1)"
+          echo "apk_path=$output_apk" >> "$GITHUB_OUTPUT"
+          echo "apk_size=$apk_size" >> "$GITHUB_OUTPUT"
+          echo "apk_sha256=$apk_sha256" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Standalone QA APK"
+            echo "- Path: \`$output_apk\`"
+            echo "- Size: \`$apk_size bytes\`"
+            echo "- SHA-256: \`$apk_sha256\`"
+            echo "- Signing: ephemeral QA key verified"
+            echo "- Bundle: embedded Hermes bytecode verified"
+            echo "- Launcher: Vibe2X MainActivity verified"
+            echo "- Metro: not required"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload standalone QA APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vibe2X-LiquidVibe-QA.apk
+          path: ${{ steps.verify.outputs.apk_path }}
+          if-no-files-found: error
+          retention-days: 14
