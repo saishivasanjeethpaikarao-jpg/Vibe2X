@@ -1,8 +1,8 @@
 import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Timer, X } from 'lucide-react-native';
-import { COLORS, SIZES, FONTS } from '../../constants/theme';
+import { COLORS, SIZES, FONTS, THEME } from '../../constants/theme';
+import { LiquidSheet } from '../liquid/LiquidSheet';
 
 type Props = {
   visible: boolean;
@@ -20,8 +20,6 @@ const OPTIONS = [
 ];
 
 export function SleepTimerSheet({ visible, onClose, expiration, onSetTimer }: Props) {
-  const insets = useSafeAreaInsets();
-
   let remaining = '';
   if (expiration) {
     const diff = Math.max(0, Math.ceil((expiration - Date.now()) / 60000));
@@ -29,19 +27,23 @@ export function SleepTimerSheet({ visible, onClose, expiration, onSetTimer }: Pr
   }
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + SIZES.lg }]}>
+    <LiquidSheet visible={visible} onClose={onClose} accessibilityLabel="Sleep timer">
+      <View>
         <View style={styles.header}>
           <View style={styles.headerText}>
-            <Text style={styles.title}>Sleep Timer</Text>
+            <Text style={styles.title}>Sleep timer</Text>
             {!!expiration && (
               <Text style={styles.subtitle}>
                 Timer active{remaining}
               </Text>
             )}
           </View>
-          <TouchableOpacity onPress={onClose} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Close sleep timer"
+          >
             <X color={COLORS.text.secondary} size={22} />
           </TouchableOpacity>
         </View>
@@ -55,6 +57,8 @@ export function SleepTimerSheet({ visible, onClose, expiration, onSetTimer }: Pr
               onSetTimer(opt.minutes);
               onClose();
             }}
+            accessibilityRole="button"
+            accessibilityLabel={`Set sleep timer to ${opt.label}`}
           >
             <View style={styles.rowIcon}>
               <Timer color={COLORS.text.primary} size={20} />
@@ -63,31 +67,11 @@ export function SleepTimerSheet({ visible, onClose, expiration, onSetTimer }: Pr
           </TouchableOpacity>
         ))}
       </View>
-    </Modal>
+    </LiquidSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    backgroundColor: COLORS.surfaceRaised,
-    borderTopLeftRadius: SIZES.radius.lg,
-    borderTopRightRadius: SIZES.radius.lg,
-    borderTopWidth: 1,
-    borderColor: COLORS.glassBorder,
-    paddingTop: SIZES.lg,
-    paddingHorizontal: SIZES.md,
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -97,6 +81,13 @@ const styles = StyleSheet.create({
   headerText: {
     flex: 1,
     marginRight: SIZES.md,
+  },
+  closeButton: {
+    width: 48,
+    height: 48,
+    marginTop: -SIZES.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontFamily: FONTS.bold,
@@ -110,6 +101,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   row: {
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: SIZES.sm + 4,
@@ -121,7 +113,7 @@ const styles = StyleSheet.create({
     borderRadius: SIZES.radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: THEME.surface.interactive,
   },
   rowLabel: {
     flex: 1,

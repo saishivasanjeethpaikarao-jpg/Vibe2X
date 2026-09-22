@@ -1,6 +1,7 @@
 ﻿import React, { useCallback, useMemo, useState } from 'react';
 import { SectionList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { TrackRow } from '../components/lists/TrackRow';
 import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
@@ -57,6 +58,7 @@ function groupByDay(entries: HistoryEntry[]): Section[] {
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation();
   const { playTrack, currentTrack, isPlaying, isLoading, togglePlayPause, next, addToQueue } = usePlayer();
   const { history, clearHistory } = useLibrary();
@@ -141,6 +143,7 @@ export default function HistoryScreen() {
           onPlayPause={togglePlayPause}
           onNext={next}
           onPress={() => navigation.navigate('NowPlaying' as never)}
+          tabBarHeight={tabBarHeight}
         />
       )}
     </View>

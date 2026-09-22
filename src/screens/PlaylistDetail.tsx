@@ -12,7 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, Play, Shuffle, ListPlus, ExternalLink } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { COLORS, SIZES, FONTS } from '../constants/theme';
+import { COLORS, SIZES, FONTS, THEME, TYPE } from '../constants/theme';
 import { TrackRow } from '../components/lists/TrackRow';
 import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
 import { MiniPlayer } from '../components/player/MiniPlayer';
@@ -20,6 +20,7 @@ import { GlassCard } from '../components/common/GlassCard';
 import { Track } from '../core/types';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
+import { ArtworkAtmosphere } from '../components/liquid/ArtworkAtmosphere';
 
 type PlaylistRouteParams = { playlistId: string };
 type PlaylistRoute = RouteProp<{ Playlist: PlaylistRouteParams }, 'Playlist'>;
@@ -60,6 +61,10 @@ export default function PlaylistDetailScreen() {
   );
 
   const tracks = playlist?.tracks ?? [];
+  const artworkUrl =
+    playlist?.coverImageUrl && playlist.coverImageUrl !== 'liked_songs_gradient'
+      ? playlist.coverImageUrl
+      : undefined;
 
   const openSourceUrl = async () => {
     const sourceUrl = playlist?.source?.url;
@@ -118,7 +123,12 @@ export default function PlaylistDetailScreen() {
   if (!playlist) {
     return (
       <View style={[styles.container, { paddingTop: insets.top + SIZES.lg }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <ChevronLeft color={COLORS.text.primary} size={28} />
         </TouchableOpacity>
         <GlassCard intensity={20} style={styles.emptyCard}>
@@ -131,8 +141,8 @@ export default function PlaylistDetailScreen() {
   const header = (
     <View style={styles.headerBlock}>
       <View style={styles.artworkWrap}>
-        {playlist.coverImageUrl ? (
-          <Image source={{ uri: playlist.coverImageUrl }} style={styles.artwork} />
+        {artworkUrl ? (
+          <Image source={{ uri: artworkUrl }} style={styles.artwork} />
         ) : (
           <View style={[styles.artwork, styles.artworkFallback]} />
         )}
@@ -148,6 +158,8 @@ export default function PlaylistDetailScreen() {
         <TouchableOpacity
           style={styles.sourceLink}
           onPress={openSourceUrl}
+          accessibilityRole="link"
+          accessibilityLabel={`Open original ${playlist.source.provider === 'spotify' ? 'Spotify' : 'YouTube'} playlist`}
         >
           {playlist.source.provider === 'spotify' ? (
             <Image source={SPOTIFY_LOGO} style={styles.spotifyLogo} resizeMode="contain" />
@@ -166,6 +178,8 @@ export default function PlaylistDetailScreen() {
           activeOpacity={0.85}
           onPress={playFromStart}
           disabled={!tracks.length}
+          accessibilityRole="button"
+          accessibilityLabel={`Play ${playlist.name} in order`}
         >
           <Play color={COLORS.background} size={20} fill={COLORS.background} />
           <Text style={styles.primaryActionText}>Play</Text>
@@ -176,6 +190,8 @@ export default function PlaylistDetailScreen() {
           activeOpacity={0.85}
           onPress={playShuffled}
           disabled={!tracks.length}
+          accessibilityRole="button"
+          accessibilityLabel={`Shuffle ${playlist.name}`}
         >
           <Shuffle color={COLORS.text.primary} size={20} />
           <Text style={styles.secondaryActionText}>Shuffle</Text>
@@ -186,6 +202,8 @@ export default function PlaylistDetailScreen() {
           activeOpacity={0.85}
           onPress={queueAll}
           disabled={!tracks.length}
+          accessibilityRole="button"
+          accessibilityLabel={`Add all tracks from ${playlist.name} to queue`}
         >
           <ListPlus color={COLORS.text.primary} size={20} />
         </TouchableOpacity>
@@ -195,6 +213,7 @@ export default function PlaylistDetailScreen() {
 
   return (
     <View style={styles.container}>
+      <ArtworkAtmosphere artworkUrl={artworkUrl} intensity="quiet" />
       <FlatList
         data={tracks}
         keyExtractor={(item) => item.id}
@@ -224,6 +243,8 @@ export default function PlaylistDetailScreen() {
         onPress={() => navigation.goBack()}
         style={[styles.backButton, { top: insets.top + SIZES.sm }]}
         hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
       >
         <ChevronLeft color={COLORS.text.primary} size={28} />
       </TouchableOpacity>
@@ -238,6 +259,7 @@ export default function PlaylistDetailScreen() {
           onPlayPause={togglePlayPause}
           onNext={next}
           onPress={() => navigation.navigate('NowPlaying' as never)}
+          tabBarHeight={insets.bottom + SIZES.sm}
         />
       )}
     </View>
@@ -247,20 +269,20 @@ export default function PlaylistDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: THEME.background.primary,
   },
   backButton: {
     position: 'absolute',
     left: SIZES.md,
     zIndex: 30,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.surfaceRaised,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    backgroundColor: THEME.surface.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
   },
   headerBlock: {
     paddingHorizontal: SIZES.md,
@@ -271,18 +293,23 @@ const styles = StyleSheet.create({
     marginBottom: SIZES.lg,
   },
   artwork: {
-    width: 200,
-    height: 200,
-    borderRadius: SIZES.radius.md,
-    backgroundColor: COLORS.surfaceLight,
+    width: 220,
+    height: 220,
+    borderRadius: 22,
+    backgroundColor: THEME.surface.interactive,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.32,
+    shadowRadius: 20,
+    elevation: 10,
   },
   artworkFallback: {
-    backgroundColor: COLORS.surfaceRaised,
+    backgroundColor: THEME.surface.interactive,
   },
   title: {
+    ...TYPE.display,
     fontFamily: FONTS.bold,
-    fontSize: 28,
-    color: COLORS.text.primary,
+    color: THEME.text.primary,
     marginBottom: SIZES.xs,
   },
   meta: {
@@ -314,10 +341,11 @@ const styles = StyleSheet.create({
     gap: SIZES.sm,
   },
   primaryAction: {
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: SIZES.sm,
-    backgroundColor: COLORS.text.primary,
+    backgroundColor: THEME.text.primary,
     paddingVertical: SIZES.sm + 4,
     paddingHorizontal: SIZES.lg,
     borderRadius: SIZES.radius.pill,
@@ -328,12 +356,13 @@ const styles = StyleSheet.create({
     color: COLORS.background,
   },
   secondaryAction: {
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: SIZES.sm,
-    backgroundColor: COLORS.surfaceRaised,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    backgroundColor: THEME.surface.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
     paddingVertical: SIZES.sm + 4,
     paddingHorizontal: SIZES.md,
     borderRadius: SIZES.radius.pill,
@@ -344,14 +373,14 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
   },
   iconAction: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: SIZES.radius.pill,
-    backgroundColor: COLORS.surfaceRaised,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    backgroundColor: THEME.surface.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
   },
   actionDisabled: {
     opacity: 0.4,

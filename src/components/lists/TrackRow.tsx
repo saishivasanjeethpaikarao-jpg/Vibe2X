@@ -10,7 +10,7 @@ import {
 import { MoreVertical, ListPlus } from 'lucide-react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Track } from '../../core/types';
-import { COLORS, SIZES, FONTS } from '../../constants/theme';
+import { COLORS, SIZES, FONTS, THEME } from '../../constants/theme';
 
 interface TrackRowProps {
   track: Track;
@@ -56,8 +56,12 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
       style={styles.container}
       activeOpacity={0.7}
       onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={`${track.title} by ${track.artist.name}`}
+      accessibilityState={{ selected: Boolean(isPlaying), busy: Boolean(isLoading) }}
     >
       <Image source={{ uri: track.albumImageUrl }} style={styles.image} />
+      {isPlaying && <View style={styles.playingIndicator} />}
 
       <View style={styles.infoContainer}>
         <Text style={[styles.title, isPlaying && styles.playingTitle]} numberOfLines={1}>
@@ -72,11 +76,16 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
         <View style={styles.moreButton}>
           <ActivityIndicator size="small" color={COLORS.text.secondary} />
         </View>
-      ) : (
-        <TouchableOpacity style={styles.moreButton} onPress={handleMorePress}>
+      ) : onMorePress ? (
+        <TouchableOpacity
+          style={styles.moreButton}
+          onPress={handleMorePress}
+          accessibilityRole="button"
+          accessibilityLabel={`More options for ${track.title}`}
+        >
           <MoreVertical color={COLORS.text.secondary} size={20} />
         </TouchableOpacity>
-      )}
+      ) : null}
     </TouchableOpacity>
   );
 
@@ -120,6 +129,13 @@ const styles = StyleSheet.create({
     borderRadius: SIZES.radius.sm,
     backgroundColor: COLORS.surfaceLight,
   },
+  playingIndicator: {
+    width: 3,
+    height: 28,
+    borderRadius: 2,
+    marginLeft: SIZES.xs,
+    backgroundColor: THEME.accent.secondary,
+  },
   infoContainer: {
     flex: 1,
     marginLeft: SIZES.md,
@@ -140,6 +156,9 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
   },
   moreButton: {
-    padding: SIZES.sm,
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   }
 });

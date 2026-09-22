@@ -4,14 +4,16 @@ import {
   Text,
   View,
   ScrollView,
+  FlatList,
   TouchableOpacity,
   TextInput,
   Image,
   Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Plus, X, Trash2, Pin, Download } from 'lucide-react-native';
-import { COLORS, SIZES, FONTS } from '../constants/theme';
+import { COLORS, SIZES, FONTS, THEME, TYPE } from '../constants/theme';
 import { Pill } from '../components/common/Pill';
 import { GlassCard } from '../components/common/GlassCard';
 import { TrackRow } from '../components/lists/TrackRow';
@@ -33,8 +35,17 @@ const SPOTIFY_LOGO = require('../../assets/spotify-full-logo-white.png');
 
 const FILTERS = ['Playlists', 'Artists', 'Albums', 'Local Files'];
 
+type LibraryItem =
+  | { kind: 'playlist'; playlist: Playlist }
+  | { kind: 'artist'; artist: { name: string; image: string; count: number } }
+  | { kind: 'album'; album: { name: string; artist: string; image: string; count: number } }
+  | { kind: 'local'; track: Track }
+  | { kind: 'scan' }
+  | { kind: 'empty'; message: string };
+
 export default function LibraryScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation<NativeStackNavigationProp<LibraryStackParams>>();
   const [activeFilter, setActiveFilter] = useState('Playlists');
   const { playTrack, currentTrack, isPlaying, togglePlayPause, isLoading, next } = usePlayer();
@@ -139,202 +150,245 @@ export default function LibraryScreen() {
     navigation.navigate('Playlist', { playlistId: playlist.id });
   };
 
+  const libraryItems = useMemo<LibraryItem[]>(() => {
+    switch (activeFilter) {
+      case 'Playlists':
+        return allPlaylists.map((playlist) => ({ kind: 'playlist', playlist }));
+      case 'Artists':
+        return derived.artists.length
+          ? derived.artists.map((artist) => ({ kind: 'artist', artist }))
+          : [{ kind: 'empty', message: 'Artists appear here as you save music.' }];
+      case 'Albums':
+        return derived.albums.length
+          ? derived.albums.map((album) => ({ kind: 'album', album }))
+          : [{ kind: 'empty', message: 'Albums appear here as you save music.' }];
+      case 'Local Files':
+        return [
+          { kind: 'scan' },
+          ...localTracks.map((track) => ({ kind: 'local' as const, track })),
+          ...(hasScanned && localTracks.length === 0
+            ? [{ kind: 'empty' as const, message: 'No local audio files found.' }]
+            : []),
+        ];
+      default:
+        return [];
+    }
+  }, [activeFilter, allPlaylists, derived.albums, derived.artists, hasScanned, localTracks]);
+
   return (
     <View style={styles.container}>
-      <ScrollView
+      <FlatList
+        data={libraryItems}
+        keyExtractor={(item, index) => {
+          switch (item.kind) {
+            case 'playlist': return `playlist:${item.playlist.id}`;
+            case 'artist': return `artist:${item.artist.name}`;
+            case 'album': return `album:${item.album.name}:${item.album.artist}`;
+            case 'local': return `local:${item.track.id}:${index}`;
+            case 'scan': return 'scan';
+            case 'empty': return `empty:${activeFilter}`;
+          }
+        }}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollContent,
           { paddingTop: insets.top + SIZES.lg, paddingBottom: SIZES.bottomInset }
         ]}
-      >
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Your Library</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => {
-              setShowImport((v) => !v);
-            }}
-          >
-            {showImport ? (
-              <X color={COLORS.text.primary} size={24} />
-            ) : (
-              <Plus color={COLORS.text.primary} size={24} />
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {showImport && (
-          <GlassCard intensity={20} style={styles.importCard}>
-            <Text style={styles.importTitle}>New playlist</Text>
-            <View style={styles.importRow}>
-              <TextInput
-                style={styles.importInput}
-                placeholder="Playlist name"
-                placeholderTextColor={COLORS.text.muted}
-                value={newPlaylistName}
-                onChangeText={setNewPlaylistName}
-                onSubmitEditing={onCreatePlaylist}
-                returnKeyType="done"
-                maxLength={60}
-              />
+        ListHeaderComponent={(
+          <>
+            <View style={styles.header}>
+              <View>
+                <Text style={styles.headerTitle} accessibilityRole="header">Your Library</Text>
+                <Text style={styles.headerSubtitle}>Playlists, saved music, and local audio</Text>
+              </View>
               <TouchableOpacity
-                style={[
-                  styles.importButton,
-                  !newPlaylistName.trim() && styles.importButtonDisabled,
-                ]}
-                onPress={onCreatePlaylist}
-                disabled={!newPlaylistName.trim()}
+                style={styles.addButton}
+                onPress={() => setShowImport((value) => !value)}
+                accessibilityRole="button"
+                accessibilityLabel={showImport ? 'Close playlist actions' : 'Create or import playlist'}
               >
-                <Text style={styles.importButtonText}>Create</Text>
+                {showImport ? (
+                  <X color={COLORS.text.primary} size={24} />
+                ) : (
+                  <Plus color={COLORS.text.primary} size={24} />
+                )}
               </TouchableOpacity>
             </View>
 
-            <View style={styles.panelDivider} />
+            {showImport && (
+              <GlassCard intensity={20} style={styles.importCard}>
+                <Text style={styles.importTitle}>New playlist</Text>
+                <View style={styles.importRow}>
+                  <TextInput
+                    style={styles.importInput}
+                    placeholder="Playlist name"
+                    placeholderTextColor={COLORS.text.secondary}
+                    value={newPlaylistName}
+                    onChangeText={setNewPlaylistName}
+                    onSubmitEditing={onCreatePlaylist}
+                    returnKeyType="done"
+                    maxLength={60}
+                    accessibilityLabel="New playlist name"
+                  />
+                  <TouchableOpacity
+                    style={[
+                      styles.importButton,
+                      !newPlaylistName.trim() && styles.importButtonDisabled,
+                    ]}
+                    onPress={onCreatePlaylist}
+                    disabled={!newPlaylistName.trim()}
+                    accessibilityRole="button"
+                    accessibilityLabel="Create playlist"
+                  >
+                    <Text style={styles.importButtonText}>Create</Text>
+                  </TouchableOpacity>
+                </View>
 
-            <TouchableOpacity
-              style={styles.importAction}
-              onPress={() => {
-                setShowImport(false);
-                navigation.navigate('ImportPlaylist');
-              }}
-            >
-              <Download color={COLORS.text.primary} size={20} />
-              <View style={styles.importActionCopy}>
-                <Text style={styles.importActionTitle}>Import Playlist</Text>
-                <Text style={styles.importActionSubtitle}>YouTube, YouTube Music, or Spotify</Text>
-              </View>
-            </TouchableOpacity>
-          </GlassCard>
-        )}
+                <View style={styles.panelDivider} />
 
-        <View style={styles.filtersContainer}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {FILTERS.map(filter => (
-              <Pill
-                key={filter}
-                label={filter}
-                isActive={activeFilter === filter}
-                onPress={() => setActiveFilter(filter)}
-              />
-            ))}
-          </ScrollView>
-        </View>
-
-        <View style={styles.listContainer}>
-          {activeFilter === 'Playlists' &&
-            allPlaylists.map(playlist => (
-              <View key={playlist.id}>
                 <TouchableOpacity
-                  style={styles.playlistRow}
-                  activeOpacity={0.7}
-                  onPress={() => openPlaylist(playlist)}
-                  onLongPress={() => onPlayPlaylist(playlist)}
+                  style={styles.importAction}
+                  onPress={() => {
+                    setShowImport(false);
+                    navigation.navigate('ImportPlaylist');
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Import playlist from YouTube or Spotify"
                 >
-                  {playlist.coverImageUrl && playlist.coverImageUrl !== 'liked_songs_gradient' ? (
-                    <Image
-                      source={{ uri: playlist.coverImageUrl }}
-                      style={styles.playlistImage}
-                    />
-                  ) : (
-                    <View style={[styles.playlistImage, styles.likedSongsGradient]} />
-                  )}
-                  <View style={styles.playlistInfo}>
-                    <Text style={styles.playlistTitle} numberOfLines={1}>{playlist.name}</Text>
-                    {playlist.source?.provider === 'spotify' ? (
-                      <View style={styles.spotifyAttribution}>
-                        <Text style={styles.playlistSubtitle}>Playlist • {playlist.tracks.length}</Text>
-                        <Image source={SPOTIFY_LOGO} style={styles.spotifyLogo} resizeMode="contain" />
-                      </View>
-                    ) : (
-                      <Text style={styles.playlistSubtitle}>
-                        {playlist.id === 'liked'
-                          ? `${playlist.tracks.length} songs`
-                          : `Playlist • ${playlist.creator} • ${playlist.tracks.length}`}
-                      </Text>
-                    )}
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    {playlist.id !== 'liked' && (
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => togglePinPlaylist(playlist.id)}
-                      >
-                        <Pin color={playlist.pinned ? COLORS.accent.magenta : COLORS.text.muted} size={18} />
-                      </TouchableOpacity>
-                    )}
-                    {playlist.id !== 'liked' && (
-                      <TouchableOpacity
-                        style={styles.deleteButton}
-                        onPress={() => deletePlaylist(playlist.id)}
-                      >
-                        <Trash2 color={COLORS.text.muted} size={18} />
-                      </TouchableOpacity>
-                    )}
+                  <Download color={COLORS.text.primary} size={20} />
+                  <View style={styles.importActionCopy}>
+                    <Text style={styles.importActionTitle}>Import Playlist</Text>
+                    <Text style={styles.importActionSubtitle}>YouTube, YouTube Music, or Spotify</Text>
                   </View>
                 </TouchableOpacity>
-              </View>
-            ))}
+              </GlassCard>
+            )}
 
-          {activeFilter === 'Artists' &&
-            (derived.artists.length ? (
-              derived.artists.map(artist => (
-                <View key={artist.name} style={styles.playlistRow}>
-                  <Image source={{ uri: artist.image }} style={styles.artistImage} />
-                  <View style={styles.playlistInfo}>
-                    <Text style={styles.playlistTitle}>{artist.name}</Text>
-                    <Text style={styles.playlistSubtitle}>
-                      Artist • {artist.count} {artist.count === 1 ? 'song' : 'songs'}
-                    </Text>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <Text style={styles.emptyHint}>Artists appear here as you save music.</Text>
-            ))}
-
-          {activeFilter === 'Albums' &&
-            (derived.albums.length ? (
-              derived.albums.map(album => (
-                <View key={album.name} style={styles.playlistRow}>
-                  <Image source={{ uri: album.image }} style={styles.playlistImage} />
-                  <View style={styles.playlistInfo}>
-                    <Text style={styles.playlistTitle}>{album.name}</Text>
-                    <Text style={styles.playlistSubtitle}>
-                      Album • {album.artist}
-                    </Text>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <Text style={styles.emptyHint}>Albums appear here as you save music.</Text>
-            ))}
-          {activeFilter === 'Local Files' && (
-            <View>
-              <TouchableOpacity
-                style={{ padding: 16, backgroundColor: '#333', borderRadius: 8, margin: 16, alignItems: 'center' }}
-                onPress={scanLocalMusic}
-              >
-                <Text style={{ color: '#fff' }}>{isScanning ? 'Scanning...' : 'Scan Local Music'}</Text>
-              </TouchableOpacity>
-              {localTracks.length > 0 ? (
-                localTracks.map((track) => (
-                  <TrackRow
-                    key={track.id}
-                    track={track}
-                    onPress={() => playTrack(track, { tracks: localTracks, label: 'Local Music' })}
-                    isPlaying={currentTrack?.id === track.id && isPlaying}
-                    
-                    
+            <View style={styles.filtersContainer}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                {FILTERS.map((filter) => (
+                  <Pill
+                    key={filter}
+                    label={filter}
+                    isActive={activeFilter === filter}
+                    onPress={() => setActiveFilter(filter)}
                   />
-                ))
-              ) : (
-                hasScanned ? <Text style={styles.emptyHint}>No local audio files found.</Text> : null
-              )}
+                ))}
+              </ScrollView>
             </View>
-          )}
-        </View>
-      </ScrollView>
+          </>
+        )}
+        renderItem={({ item }) => {
+          if (item.kind === 'playlist') {
+            const playlist = item.playlist;
+            return (
+              <TouchableOpacity
+                style={styles.playlistRow}
+                activeOpacity={0.7}
+                onPress={() => openPlaylist(playlist)}
+                onLongPress={() => onPlayPlaylist(playlist)}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${playlist.name}, ${playlist.tracks.length} tracks`}
+                accessibilityHint="Long press to play"
+              >
+                {playlist.coverImageUrl && playlist.coverImageUrl !== 'liked_songs_gradient' ? (
+                  <Image source={{ uri: playlist.coverImageUrl }} style={styles.playlistImage} />
+                ) : (
+                  <View style={[styles.playlistImage, styles.likedSongsGradient]} />
+                )}
+                <View style={styles.playlistInfo}>
+                  <Text style={styles.playlistTitle} numberOfLines={1}>{playlist.name}</Text>
+                  {playlist.source?.provider === 'spotify' ? (
+                    <View style={styles.spotifyAttribution}>
+                      <Text style={styles.playlistSubtitle}>Playlist • {playlist.tracks.length}</Text>
+                      <Image source={SPOTIFY_LOGO} style={styles.spotifyLogo} resizeMode="contain" />
+                    </View>
+                  ) : (
+                    <Text style={styles.playlistSubtitle}>
+                      {playlist.id === 'liked'
+                        ? `${playlist.tracks.length} songs`
+                        : `Playlist • ${playlist.creator} • ${playlist.tracks.length}`}
+                    </Text>
+                  )}
+                </View>
+                {playlist.id !== 'liked' && (
+                  <View style={styles.playlistActions}>
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => togglePinPlaylist(playlist.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={playlist.pinned ? `Unpin ${playlist.name}` : `Pin ${playlist.name}`}
+                    >
+                      <Pin color={playlist.pinned ? COLORS.accent.magenta : COLORS.text.muted} size={18} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      onPress={() => deletePlaylist(playlist.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${playlist.name}`}
+                    >
+                      <Trash2 color={COLORS.text.muted} size={18} />
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          }
+
+          if (item.kind === 'artist') {
+            const artist = item.artist;
+            return (
+              <View style={styles.playlistRow}>
+                <Image source={{ uri: artist.image }} style={styles.artistImage} />
+                <View style={styles.playlistInfo}>
+                  <Text style={styles.playlistTitle}>{artist.name}</Text>
+                  <Text style={styles.playlistSubtitle}>
+                    Artist • {artist.count} {artist.count === 1 ? 'song' : 'songs'}
+                  </Text>
+                </View>
+              </View>
+            );
+          }
+
+          if (item.kind === 'album') {
+            const album = item.album;
+            return (
+              <View style={styles.playlistRow}>
+                <Image source={{ uri: album.image }} style={styles.playlistImage} />
+                <View style={styles.playlistInfo}>
+                  <Text style={styles.playlistTitle}>{album.name}</Text>
+                  <Text style={styles.playlistSubtitle}>Album • {album.artist}</Text>
+                </View>
+              </View>
+            );
+          }
+
+          if (item.kind === 'local') {
+            return (
+              <TrackRow
+                track={item.track}
+                onPress={() => playTrack(item.track, { tracks: localTracks, label: 'Local Music' })}
+                isPlaying={currentTrack?.id === item.track.id && isPlaying}
+              />
+            );
+          }
+
+          if (item.kind === 'scan') {
+            return (
+              <TouchableOpacity
+                style={styles.scanButton}
+                onPress={scanLocalMusic}
+                accessibilityRole="button"
+                accessibilityLabel={isScanning ? 'Scanning local music' : 'Scan local music'}
+              >
+                <Text style={styles.scanButtonText}>{isScanning ? 'Scanning…' : 'Scan local music'}</Text>
+              </TouchableOpacity>
+            );
+          }
+
+          return <Text style={styles.emptyHint}>{item.message}</Text>;
+        }}
+      />
 
       <StatusBarScrim />
 
@@ -347,6 +401,7 @@ export default function LibraryScreen() {
           onPlayPause={togglePlayPause}
           onNext={next}
           onPress={() => navigation.navigate('NowPlaying')}
+          tabBarHeight={tabBarHeight}
         />
       )}
     </View>
@@ -356,7 +411,7 @@ export default function LibraryScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: THEME.background.primary,
   },
   scrollContent: {
     paddingHorizontal: SIZES.md,
@@ -368,23 +423,38 @@ const styles = StyleSheet.create({
     marginBottom: SIZES.md,
   },
   headerTitle: {
-    fontFamily: FONTS.medium,
-    fontSize: 28,
-    color: COLORS.text.primary,
+    ...TYPE.display,
+    fontFamily: FONTS.bold,
+    color: THEME.text.primary,
+  },
+  headerSubtitle: {
+    marginTop: 2,
+    fontFamily: FONTS.regular,
+    fontSize: 13,
+    color: THEME.text.secondary,
   },
   addButton: {
-    padding: SIZES.sm,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: THEME.surface.interactive,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
   },
   filtersContainer: {
     marginBottom: SIZES.xl,
   },
-  listContainer: {
-    flex: 1,
+  playlistActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   playlistRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: SIZES.md,
+    minHeight: 76,
     paddingVertical: SIZES.xs,
   },
   playlistImage: {
@@ -400,7 +470,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surfaceLight,
   },
   likedSongsGradient: {
-    backgroundColor: '#8A2BE2', // Simple fallback for linear gradient
+    backgroundColor: THEME.accent.primary,
   },
   playlistInfo: {
     flex: 1,
@@ -419,7 +489,10 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
   },
   deleteButton: {
-    padding: SIZES.sm,
+    width: SIZES.touchTarget,
+    height: SIZES.touchTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   expandedTracks: {
     marginBottom: SIZES.md,
@@ -427,7 +500,7 @@ const styles = StyleSheet.create({
   emptyHint: {
     fontFamily: FONTS.regular,
     fontSize: 14,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     paddingHorizontal: SIZES.md,
     paddingVertical: SIZES.sm,
   },
@@ -447,7 +520,7 @@ const styles = StyleSheet.create({
   },
   importInput: {
     flex: 1,
-    height: 40,
+    height: SIZES.touchTarget,
     fontFamily: FONTS.regular,
     fontSize: 14,
     color: COLORS.text.primary,
@@ -459,7 +532,7 @@ const styles = StyleSheet.create({
   },
   importButton: {
     marginLeft: SIZES.sm,
-    height: 40,
+    height: SIZES.touchTarget,
     minWidth: 56,
     paddingHorizontal: SIZES.md,
     borderRadius: SIZES.radius.sm,
@@ -474,6 +547,21 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: COLORS.glassBorder,
     marginVertical: SIZES.md,
+  },
+  scanButton: {
+    minHeight: 52,
+    marginVertical: SIZES.md,
+    borderRadius: SIZES.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: THEME.surface.interactive,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
+  },
+  scanButtonText: {
+    fontFamily: FONTS.medium,
+    fontSize: 15,
+    color: THEME.text.primary,
   },
   spotifyAttribution: {
     alignItems: 'flex-start',

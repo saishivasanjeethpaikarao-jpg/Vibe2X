@@ -4,7 +4,9 @@ import { Play, Pause, MonitorSpeaker, SkipForward } from 'lucide-react-native';
 import { Track } from '../../core/types';
 import { useProgress } from '../../hooks/usePlayer';
 import { PlaybackSourceSheet } from './PlaybackSourceSheet';
-import { COLORS, SIZES, FONTS, SHADOWS } from '../../constants/theme';
+import { COLORS, SIZES, FONTS, THEME } from '../../constants/theme';
+import { GlassSurface } from '../liquid/GlassSurface';
+import { PressableScale } from '../liquid/PressableScale';
 
 interface MiniPlayerProps {
   track: Track | null;
@@ -43,7 +45,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
   onPress, 
   onPlayPause,
   onNext,
-  tabBarHeight = Platform.OS === 'ios' ? 88 : 68,
+  tabBarHeight = Platform.OS === 'ios' ? 88 : 72,
   isLoading = false
 }) => {
   const [showSource, setShowSource] = useState(false);
@@ -52,39 +54,43 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
   if (!track) return null;
 
   return (
-    <TouchableOpacity 
-      activeOpacity={0.9} 
-      onPress={onPress}
+    <>
+    <View
       style={[
         styles.positionContainer, 
-        { bottom: tabBarHeight } // Flush with the tab bar: no gap for content to show through
+        { bottom: tabBarHeight }
       ]}
     >
-      <View style={[styles.container, SHADOWS.glass]}>
+      <GlassSurface strength="floating" style={styles.container}>
         <View style={styles.content}>
-          <Image source={{ uri: track.albumImageUrl }} style={styles.image} />
-          
-          <View style={styles.infoContainer}>
-            <Text style={styles.title} numberOfLines={1}>{track.title}</Text>
-            <Text style={styles.artist} numberOfLines={1}>{track.artist.name}</Text>
-          </View>
+          <PressableScale
+            onPress={onPress}
+            accessibilityRole="button"
+            accessibilityLabel={`Open Now Playing for ${track.title} by ${track.artist.name}`}
+            style={styles.openPlayerButton}
+            contentStyle={styles.openPlayerContent}
+          >
+            <Image source={{ uri: track.albumImageUrl }} style={styles.image} />
+            <View style={styles.infoContainer}>
+              <Text style={styles.title} numberOfLines={1}>{track.title}</Text>
+              <Text style={styles.artist} numberOfLines={1}>{track.artist.name}</Text>
+            </View>
+          </PressableScale>
 
           <View style={styles.controls}>
             <TouchableOpacity
               style={styles.iconButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                setShowSource(true);
-              }}
+              accessibilityRole="button"
+              accessibilityLabel="Playback source"
+              onPress={() => setShowSource(true)}
             >
                <MonitorSpeaker color={COLORS.text.secondary} size={20} />
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.playButton}
-              onPress={(e) => {
-                e.stopPropagation();
-                onPlayPause();
-              }}
+              accessibilityRole="button"
+              accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
+              onPress={onPlayPause}
             >
               {isLoading ? (
                 <ActivityIndicator size="small" color={COLORS.text.primary} />
@@ -97,10 +103,9 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
             {onNext && (
               <TouchableOpacity
                 style={styles.iconButton}
-                onPress={(e) => {
-                  e.stopPropagation();
-                  onNext();
-                }}
+                accessibilityRole="button"
+                accessibilityLabel="Next track"
+                onPress={onNext}
               >
                 <SkipForward color={COLORS.text.primary} size={20} fill={COLORS.text.primary} />
               </TouchableOpacity>
@@ -110,31 +115,37 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
         
         {/* Progress Bar */}
         <MiniPlayerProgress />
-      </View>
-
-      <PlaybackSourceSheet visible={showSource} onClose={() => setShowSource(false)} />
-    </TouchableOpacity>
+      </GlassSurface>
+    </View>
+    <PlaybackSourceSheet visible={showSource} onClose={() => setShowSource(false)} />
+    </>
   );
 };
 
 const styles = StyleSheet.create({
   positionContainer: {
     position: 'absolute',
-    left: SIZES.sm,
-    right: SIZES.sm,
+    left: 10,
+    right: 10,
     zIndex: 100,
   },
   container: {
     borderRadius: SIZES.radius.md,
     overflow: 'hidden',
-    backgroundColor: COLORS.surfaceRaised,
-    borderColor: COLORS.glassBorder,
-    borderWidth: 1,
+    backgroundColor: THEME.surface.glassStrong,
   },
   content: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 58,
     padding: 8,
+  },
+  openPlayerButton: {
+    flex: 1,
+  },
+  openPlayerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   image: {
     width: 40,
@@ -163,10 +174,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   iconButton: {
-    padding: SIZES.sm,
+    minWidth: SIZES.touchTarget,
+    minHeight: SIZES.touchTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   playButton: {
-    padding: SIZES.sm,
+    width: SIZES.touchTarget,
+    height: SIZES.touchTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: SIZES.touchTarget / 2,
+    backgroundColor: THEME.surface.selected,
     marginLeft: SIZES.xs,
   },
   progressTrack: {

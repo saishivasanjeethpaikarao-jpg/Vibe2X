@@ -5,22 +5,17 @@ import {
   View,
   Image,
   TouchableOpacity,
-  FlatList,
-  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, X, Music, Search, ListPlus } from 'lucide-react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, SIZES, FONTS } from '../constants/theme';
+import { ChevronDown, Music, Search, ListPlus } from 'lucide-react-native';
+import { COLORS, SIZES, FONTS, THEME } from '../constants/theme';
 import { Track } from '../core/types';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { useNavigation } from '@react-navigation/native';
 
-const { width } = Dimensions.get('window');
-
 /**
- * Full-screen queue view — replaces the broken 120px inline panel.
+ * Queue sheet — replaces the broken 120px inline panel.
  *
  * Shows the currently playing track at the top, then a fully scrollable
  * "Up Next" list with remove buttons. Navigated to from NowPlaying or
@@ -50,6 +45,8 @@ export default function QueueScreen() {
       <TouchableOpacity
         style={styles.deleteAction}
         onPress={() => removeFromQueue(item.id)}
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${item.title} from queue`}
       >
         <Text style={styles.deleteActionText}>Remove</Text>
       </TouchableOpacity>
@@ -58,6 +55,13 @@ export default function QueueScreen() {
 
   const renderUpcomingTrack = ({ item, drag, isActive, getIndex }: RenderItemParams<Track>) => {
     const isAuto = item.isAutoSuggested;
+    const index = getIndex() ?? -1;
+    const reorderActions = [
+      ...(index > 0 ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
+      ...(index >= 0 && index < upcoming.length - 1
+        ? [{ name: 'moveDown' as const, label: 'Move later' }]
+        : []),
+    ];
     return (
       <Swipeable
         renderRightActions={() => renderRightActions(item)}
@@ -73,6 +77,8 @@ export default function QueueScreen() {
             style={styles.trackRowMain}
             activeOpacity={0.7}
             onPress={() => jumpTo(item.id)}
+            accessibilityRole="button"
+            accessibilityLabel={`Play ${item.title} by ${item.artist.name}`}
           >
             <Image source={{ uri: item.albumImageUrl }} style={styles.trackThumb} />
             <View style={styles.trackInfo}>
@@ -89,6 +95,21 @@ export default function QueueScreen() {
             delayLongPress={150}
             activeOpacity={0.7}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Reorder ${item.title}`}
+            accessibilityHint="Long press and drag, or use accessibility actions"
+            accessibilityActions={reorderActions}
+            onAccessibilityAction={(event) => {
+              if (index < 0) return;
+              if (event.nativeEvent.actionName === 'moveUp' && index > 0) {
+                reorderQueue(index, index - 1);
+              } else if (
+                event.nativeEvent.actionName === 'moveDown' &&
+                index < upcoming.length - 1
+              ) {
+                reorderQueue(index, index + 1);
+              }
+            }}
           >
             <GripVertical color={COLORS.text.muted} size={20} />
           </TouchableOpacity>
@@ -99,20 +120,24 @@ export default function QueueScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Background gradient */}
-      <LinearGradient
-        colors={[COLORS.surfaceRaised, COLORS.background]}
-        locations={[0, 0.3]}
+      <TouchableOpacity
         style={StyleSheet.absoluteFill}
+        activeOpacity={1}
+        onPress={() => navigation.goBack()}
+        accessibilityRole="button"
+        accessibilityLabel="Close queue"
       />
 
-      <View style={[styles.content, { paddingTop: insets.top }]}>
+      <View style={styles.content}>
+        <View style={styles.sheetHandle} />
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
             style={styles.headerIcon}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel="Close queue"
           >
             <ChevronDown color={COLORS.text.primary} size={28} />
           </TouchableOpacity>
@@ -125,20 +150,24 @@ export default function QueueScreen() {
           {upcoming.length > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <TouchableOpacity
-                style={[styles.headerIcon, { width: 32 }]}
+                style={styles.headerIcon}
                 onPress={() => {
                   if (currentTrack) {
                     createPlaylist(`Queue • ${new Date().toLocaleDateString()}`, [currentTrack, ...upcoming]);
                   }
                 }}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Save queue as playlist"
               >
                 <ListPlus color={COLORS.text.secondary} size={20} />
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.headerIcon, { width: 44 }]}
+                style={styles.headerIcon}
                 onPress={clearQueue}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Clear queue"
               >
                 <Text style={styles.clearText}>Clear</Text>
               </TouchableOpacity>
@@ -151,7 +180,7 @@ export default function QueueScreen() {
         {/* Now Playing */}
         {currentTrack && (
           <View style={styles.nowPlayingCard}>
-            <Text style={styles.sectionLabel}>NOW PLAYING</Text>
+            <Text style={styles.sectionLabel}>Now playing</Text>
             <View style={styles.nowPlayingRow}>
               <Image
                 source={{ uri: currentTrack.albumImageUrl }}
@@ -170,7 +199,7 @@ export default function QueueScreen() {
         )}
 
         {/* Up Next */}
-        <Text style={styles.sectionLabel}>UP NEXT</Text>
+        <Text style={styles.sectionLabel}>Up next</Text>
 
         {upcoming.length === 0 ? (
           <View style={styles.emptyState}>
@@ -185,7 +214,7 @@ export default function QueueScreen() {
                 navigation.goBack();
                 // Navigate to search tab after going back
                 setTimeout(() => {
-                  (navigation as any).navigate('Main', { screen: 'Search' });
+                  (navigation as any).navigate('Main', { screen: 'SearchTab' });
                 }, 100);
               }}
             >
@@ -214,11 +243,27 @@ export default function QueueScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.62)',
   },
   content: {
-    flex: 1,
+    height: '92%',
     paddingHorizontal: SIZES.md,
+    paddingTop: SIZES.sm,
+    backgroundColor: THEME.surface.glassStrong,
+    borderTopLeftRadius: SIZES.radius.lg,
+    borderTopRightRadius: SIZES.radius.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
+    overflow: 'hidden',
+  },
+  sheetHandle: {
+    width: 38,
+    height: 4,
+    alignSelf: 'center',
+    borderRadius: 2,
+    backgroundColor: THEME.text.disabled,
+    marginBottom: SIZES.xs,
   },
   header: {
     flexDirection: 'row',
@@ -228,6 +273,7 @@ const styles = StyleSheet.create({
   },
   headerIcon: {
     width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -254,9 +300,9 @@ const styles = StyleSheet.create({
   },
   sectionLabel: {
     fontFamily: FONTS.medium,
-    fontSize: 10,
-    letterSpacing: 2.5,
-    color: COLORS.text.muted,
+    fontSize: 13,
+    letterSpacing: 0.2,
+    color: THEME.text.secondary,
     marginTop: SIZES.lg,
     marginBottom: SIZES.sm,
   },
@@ -266,11 +312,11 @@ const styles = StyleSheet.create({
   nowPlayingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surfaceRaised,
+    backgroundColor: THEME.surface.interactive,
     borderRadius: SIZES.radius.md,
     padding: SIZES.sm,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
   },
   nowPlayingThumb: {
     width: 56,
@@ -353,6 +399,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emptyButton: {
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: SIZES.xs,
@@ -368,7 +415,7 @@ const styles = StyleSheet.create({
     color: COLORS.background,
   },
   deleteAction: {
-    backgroundColor: COLORS.accent.magenta,
+    backgroundColor: THEME.accent.danger,
     justifyContent: 'center',
     alignItems: 'center',
     width: 80,
@@ -395,7 +442,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   dragHandle: {
-    padding: SIZES.sm,
+    width: 48,
+    height: 48,
     justifyContent: 'center',
     alignItems: 'center',
   },

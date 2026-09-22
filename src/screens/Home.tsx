@@ -1,32 +1,33 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Image,
+  ScrollView,
   StyleSheet,
   Text,
-  View,
-  ScrollView,
-  Image,
   TouchableOpacity,
-  ActivityIndicator,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Search, Play, Heart, Compass, Moon, Target, User } from 'lucide-react-native';
-import { COLORS, SIZES, FONTS } from '../constants/theme';
-import { Pill } from '../components/common/Pill';
-import { GlassCard } from '../components/common/GlassCard';
-import { TrackRow } from '../components/lists/TrackRow';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { Compass, Heart, Moon, Search, Target, User } from 'lucide-react-native';
+import { useNavigation } from '@react-navigation/native';
 import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
+import { TrackRow } from '../components/lists/TrackRow';
+import { MiniPlayer } from '../components/player/MiniPlayer';
+import { GlassSurface } from '../components/liquid/GlassSurface';
+import { PressableScale } from '../components/liquid/PressableScale';
+import { SectionHeader } from '../components/liquid/SectionHeader';
+import { StatusBarScrim } from '../components/common/StatusBarScrim';
+import { COLORS, FONTS, SIZES, THEME, TYPE } from '../constants/theme';
 import { Track } from '../core/types';
 import { FEATURED_QUERY, randomQueryFor } from '../data/catalog';
-import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
+import { usePlayer } from '../hooks/usePlayer';
 import { MusicService } from '../services/MusicService';
-import { MiniPlayer } from '../components/player/MiniPlayer';
-import { StatusBarScrim } from '../components/common/StatusBarScrim';
-import { useNavigation } from '@react-navigation/native';
 
-const CATEGORIES = ['Music', 'Podcasts', 'Radio'];
+const LOGO = require('../../assets/icon.png');
 
-/** Each quick action maps to a real query, except Liked which uses the library. */
 const ACTIONS = [
   { id: 'liked', label: 'Liked', Icon: Heart, query: null },
   { id: 'discover', label: 'Discover', Icon: Compass, query: 'discover new music' },
@@ -35,12 +36,12 @@ const ACTIONS = [
 ] as const;
 
 const greetingFor = (hour: number) =>
-  hour < 12 ? 'Good morning,' : hour < 18 ? 'Good afternoon,' : 'Good evening,';
+  hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation();
-  const [activeCategory, setActiveCategory] = useState('Music');
   const {
     currentTrack,
     isPlaying,
@@ -50,35 +51,29 @@ export default function HomeScreen() {
     next,
     addToQueue,
   } = usePlayer();
-  const { recentlyPlayed, liked, profile } = useLibrary();
-
+  const { recentlyPlayed, liked, playlists, profile } = useLibrary();
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [featured, setFeatured] = useState<Track[]>([]);
-
-  /** Shown before anything has been played: a live pick, not mock data. */
   const [starter, setStarter] = useState<Track[]>([]);
   const [starterError, setStarterError] = useState(false);
+  const [addingTrack, setAddingTrack] = useState<Track | null>(null);
 
   const hasRecents = recentlyPlayed.length > 0;
+  const pinnedPlaylists = useMemo(
+    () => playlists.filter((playlist) => playlist.pinned).slice(0, 6),
+    [playlists]
+  );
 
-  // Prefetch a small starter set in the background so a fresh install is not
-  // an empty screen. Cached, so this costs nothing on later launches.
   useEffect(() => {
     let cancelled = false;
-
-    (async () => {
-      try {
-        const results = await MusicService.search(FEATURED_QUERY, { limit: 10 });
+    void MusicService.search(FEATURED_QUERY, { limit: 8 })
+      .then((results) => {
         if (cancelled) return;
-
-        setFeatured(results.tracks);
-        setStarter(results.tracks.slice(0, 3));
+        setStarter(results.tracks.slice(0, 4));
         setStarterError(false);
-      } catch {
+      })
+      .catch(() => {
         if (!cancelled) setStarterError(true);
-      }
-    })();
-
+      });
     return () => {
       cancelled = true;
     };
@@ -86,30 +81,23 @@ export default function HomeScreen() {
 
   const runAction = useCallback(
     async (action: (typeof ACTIONS)[number]) => {
-      // A fresh query each tap, so Discover/Chill/Focus do not replay the
-      // same results every time.
       const query = randomQueryFor(action.id) ?? action.query;
-
       if (query === null) {
-        // Liked: play straight from the local library, no network needed.
         if (liked.length) playTrack(liked[0], { tracks: liked, label: 'Liked Songs' });
         return;
       }
-
       setPendingAction(action.id);
       try {
         const results = await MusicService.search(query, { limit: 25 });
-        if (results.tracks.length) {
-          // Shuffle so even a repeated query starts somewhere else.
-          const shuffled = [...results.tracks];
-          for (let i = shuffled.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-          }
-          playTrack(shuffled[0], { tracks: shuffled, label: action.label });
+        if (!results.tracks.length) return;
+        const shuffled = [...results.tracks];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
+        playTrack(shuffled[0], { tracks: shuffled, label: action.label });
       } catch {
-        // Silent: the tile simply stops spinning.
+        // Keep the existing silent quick-action failure behavior.
       } finally {
         setPendingAction(null);
       }
@@ -117,17 +105,11 @@ export default function HomeScreen() {
     [liked, playTrack]
   );
 
-  const playFeatured = useCallback(() => {
-    if (!featured.length) return;
-    playTrack(featured[0], { tracks: featured, label: 'A calmer you' });
-  }, [featured, playTrack]);
-
   const listTracks = useMemo(
-    () => (hasRecents ? recentlyPlayed.slice(0, 3) : starter),
+    () => (hasRecents ? recentlyPlayed.slice(0, 4) : starter),
     [hasRecents, recentlyPlayed, starter]
   );
 
-  // One stable callback for the whole list instead of a closure per row.
   const handleTrackPress = useCallback(
     (track: Track) => {
       playTrack(track, {
@@ -135,170 +117,136 @@ export default function HomeScreen() {
         label: hasRecents ? 'Recently Played' : 'Start Listening',
       });
     },
-    [playTrack, listTracks, hasRecents]
+    [hasRecents, listTracks, playTrack]
   );
-
-  /** Track whose "add to playlist" sheet is open. */
-  const [vibeMemory, setVibeMemory] = useState<Track[]>([]);
-  const [addingTrack, setAddingTrack] = useState<Track | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { getVibeMemoryTracks } = await import('../core/lie');
-        const mem = await getVibeMemoryTracks(10);
-        if (!cancelled) setVibeMemory(mem);
-      } catch (err) {
-        // ignore
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   return (
     <View style={styles.container}>
-      {/* Pinned: greeting + search stay put while the rest of the page scrolls. */}
-      <View style={[styles.stickyHeader, { paddingTop: insets.top + SIZES.lg }]}>
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{greetingFor(new Date().getHours())}</Text>
-            {!!profile.name && <Text style={styles.name}>{profile.name}.</Text>}
-            <Text style={styles.madeBy}>MADE BY SJBUILDS</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.avatar}
-            activeOpacity={0.8}
-            onPress={() => navigation.navigate('Settings' as never)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <User color={COLORS.text.secondary} size={26} />
-          </TouchableOpacity>
+      <View style={[styles.header, { paddingTop: insets.top + SIZES.md }]}>
+        <View style={styles.brandRow}>
+          <Image source={LOGO} style={styles.brandMark} accessibilityIgnoresInvertColors />
+          <Text style={styles.brandName}>Vibe2X</Text>
         </View>
-
         <TouchableOpacity
-          style={styles.searchBar}
-          activeOpacity={0.8}
-          onPress={() => navigation.navigate('SearchTab' as never)}
+          style={styles.avatar}
+          onPress={() => navigation.navigate('Settings' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Open settings"
         >
-          <Search color={COLORS.text.secondary} size={20} />
-          <Text style={styles.searchText}>Search for songs, artists, or more...</Text>
+          <User color={THEME.text.secondary} size={22} />
         </TouchableOpacity>
       </View>
 
       <ScrollView
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: SIZES.bottomInset }
-        ]}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: SIZES.bottomInset }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.pillsContainer}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {CATEGORIES.map(cat => (
-              <Pill
-                key={cat}
-                label={cat}
-                isActive={activeCategory === cat}
-                onPress={() => setActiveCategory(cat)}
-              />
-            ))}
-          </ScrollView>
+        <View style={styles.greetingBlock}>
+          <Text style={styles.greeting}>{greetingFor(new Date().getHours())}</Text>
+          {!!profile.name && <Text style={styles.name}>{profile.name}</Text>}
         </View>
 
-        <GlassCard style={styles.featuredCard}>
-          <View style={styles.featuredContent}>
-            <Text style={styles.featuredText}>A calmer you</Text>
-            <Text style={styles.featuredText}>A softer tomorrow.</Text>
-          </View>
-          <TouchableOpacity style={styles.featuredPlayBtn} onPress={playFeatured}>
-            <Play color={COLORS.background} size={24} fill={COLORS.background} />
-          </TouchableOpacity>
-        </GlassCard>
+        <PressableScale
+          onPress={() => navigation.navigate('SearchTab' as never)}
+          accessibilityRole="button"
+          accessibilityLabel="Search music"
+          contentStyle={styles.searchBar}
+        >
+          <Search color={THEME.text.secondary} size={20} />
+          <Text style={styles.searchText}>Songs, artists, albums, playlists</Text>
+        </PressableScale>
 
-        {/* Quick action buttons row (Liked, Discover, Chill, Focus) */}
+        <SectionHeader title="Find your next vibe" />
         <View style={styles.actionsRow}>
-          {ACTIONS.map(action => (
-            <TouchableOpacity
+          {ACTIONS.map((action) => (
+            <PressableScale
               key={action.id}
               style={styles.actionTouchable}
-              activeOpacity={0.8}
+              contentStyle={styles.actionContent}
               onPress={() => runAction(action)}
+              accessibilityRole="button"
+              accessibilityLabel={`${action.label} music`}
             >
-              <GlassCard style={styles.actionCard} intensity={20}>
-                <View style={styles.actionIconPlaceholder}>
-                  {pendingAction === action.id ? (
-                    <ActivityIndicator size="small" color={COLORS.text.secondary} />
-                  ) : (
-                    <action.Icon color={COLORS.text.secondary} size={18} />
-                  )}
-                </View>
-                <Text style={styles.actionText}>{action.label}</Text>
-              </GlassCard>
-            </TouchableOpacity>
+              <View style={styles.actionIcon}>
+                {pendingAction === action.id ? (
+                  <ActivityIndicator size="small" color={THEME.text.primary} />
+                ) : (
+                  <action.Icon color={THEME.text.primary} size={19} />
+                )}
+              </View>
+              <Text style={styles.actionText}>{action.label}</Text>
+            </PressableScale>
           ))}
         </View>
 
-        {vibeMemory.length > 0 && (
+        {pinnedPlaylists.length > 0 && (
           <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Back to this vibe</Text>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 32, marginHorizontal: -24, paddingHorizontal: 24 }}>
-              {vibeMemory.map((track) => (
-                <View key={track.id} style={{ width: 260, marginRight: 16 }}>
-                  <TrackRow
-                    track={track}
-                    onPress={() => playTrack(track, { tracks: vibeMemory, label: 'Back to this vibe' })}
-                    onMorePress={() => setAddingTrack(track)}
-                  />
-                </View>
+            <SectionHeader
+              title="Pinned playlists"
+              actionLabel="Open Library"
+              onAction={() => navigation.navigate('LibraryTab' as never)}
+            />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.pinnedRow}
+            >
+              {pinnedPlaylists.map((playlist) => (
+                <PressableScale
+                  key={playlist.id}
+                  style={styles.pinnedItem}
+                  onPress={() =>
+                    (navigation as any).navigate('Playlist', { playlistId: playlist.id })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${playlist.name}`}
+                >
+                  {playlist.coverImageUrl && playlist.coverImageUrl !== 'liked_songs_gradient' ? (
+                    <Image source={{ uri: playlist.coverImageUrl }} style={styles.pinnedArtwork} />
+                  ) : (
+                    <View style={[styles.pinnedArtwork, styles.pinnedFallback]} />
+                  )}
+                  <Text style={styles.pinnedTitle} numberOfLines={1}>{playlist.name}</Text>
+                  <Text style={styles.pinnedMeta}>{playlist.tracks.length} tracks</Text>
+                </PressableScale>
               ))}
             </ScrollView>
           </>
         )}
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>
-            {hasRecents ? 'Recently Played' : 'Start Listening'}
-          </Text>
-          <TouchableOpacity onPress={() => navigation.navigate('LibraryTab' as never)}>
-            <Text style={styles.seeAll}>See all</Text>
-          </TouchableOpacity>
-        </View>
+        <SectionHeader
+          title={hasRecents ? 'Recently played' : 'Start listening'}
+          actionLabel={hasRecents ? 'See history' : 'Search'}
+          onAction={() => navigation.navigate((hasRecents ? 'HistoryTab' : 'SearchTab') as never)}
+        />
 
         <View style={styles.listContainer}>
-          {listTracks.length > 0 ? (
-            listTracks.map(track => (
+          {listTracks.length ? (
+            listTracks.map((track) => (
               <TrackRow
                 key={track.id}
                 track={track}
                 onPress={handleTrackPress}
                 onMorePress={setAddingTrack}
-                  onSwipeRight={addToQueue}
+                onSwipeRight={addToQueue}
                 isPlaying={currentTrack?.id === track.id && isPlaying}
               />
             ))
           ) : (
-            <GlassCard intensity={20} style={styles.emptyCard}>
-              <Text style={styles.emptyText}>
-                {starterError ? "Couldn't load suggestions." : 'Finding something for you...'}
+            <GlassSurface strength="soft" style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>
+                {starterError ? 'Music is unavailable right now' : 'Loading music'}
               </Text>
-              <Text style={styles.emptyHint}>
-                {starterError
-                  ? 'Check your connection and pull to retry.'
-                  : 'Search for anything to get started.'}
+              <Text style={styles.emptyCopy}>
+                {starterError ? 'Check your connection or use Search to try again.' : 'Finding real tracks from the current provider.'}
               </Text>
-            </GlassCard>
+            </GlassSurface>
           )}
         </View>
-
       </ScrollView>
 
       <StatusBarScrim />
-
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
-
       {currentTrack && (
         <MiniPlayer
           track={currentTrack}
@@ -306,9 +254,8 @@ export default function HomeScreen() {
           isLoading={isLoading}
           onPlayPause={togglePlayPause}
           onNext={next}
-          onPress={() => {
-            navigation.navigate('NowPlaying' as never);
-          }}
+          onPress={() => navigation.navigate('NowPlaying' as never)}
+          tabBarHeight={tabBarHeight}
         />
       )}
     </View>
@@ -316,154 +263,73 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  scrollContent: {
-    paddingHorizontal: SIZES.md,
-  },
-  stickyHeader: {
+  container: { flex: 1, backgroundColor: THEME.background.primary },
+  header: {
+    minHeight: 76,
     paddingHorizontal: SIZES.md,
     paddingBottom: SIZES.sm,
-    backgroundColor: COLORS.background,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: THEME.background.primary,
     zIndex: 20,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: SIZES.lg,
-  },
-  madeBy: {
-    fontFamily: FONTS.medium,
-    fontSize: 9,
-    letterSpacing: 2.5,
-    color: COLORS.text.muted,
-    marginTop: SIZES.xs,
-  },
-  greeting: {
-    fontFamily: FONTS.regular,
-    fontSize: 20,
-    color: COLORS.text.secondary,
-  },
-  name: {
-    fontFamily: FONTS.medium,
-    fontSize: 28,
-    color: COLORS.text.primary,
-  },
+  brandRow: { flexDirection: 'row', alignItems: 'center' },
+  brandMark: { width: 34, height: 34, borderRadius: 9, marginRight: SIZES.sm },
+  brandName: { fontFamily: FONTS.bold, fontSize: 20, color: THEME.text.primary, letterSpacing: -0.4 },
   avatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: COLORS.surfaceRaised,
+    backgroundColor: THEME.surface.interactive,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
   },
+  scrollContent: { paddingHorizontal: SIZES.md },
+  greetingBlock: { marginTop: SIZES.md, marginBottom: SIZES.lg },
+  greeting: { ...TYPE.body, fontFamily: FONTS.regular, color: THEME.text.secondary },
+  name: { ...TYPE.display, fontFamily: FONTS.bold, color: THEME.text.primary, marginTop: 2 },
   searchBar: {
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.glass,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
+    paddingHorizontal: SIZES.md,
     borderRadius: SIZES.radius.md,
-    padding: SIZES.md,
-    marginBottom: SIZES.md,
+    backgroundColor: THEME.surface.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.glass,
   },
-  searchText: {
-    fontFamily: FONTS.regular,
-    fontSize: 14,
-    color: COLORS.text.secondary,
-    marginLeft: SIZES.sm,
-  },
-  pillsContainer: {
-    marginBottom: SIZES.lg,
-  },
-  featuredCard: {
-    padding: SIZES.lg,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  searchText: { flex: 1, marginLeft: SIZES.sm, fontFamily: FONTS.regular, fontSize: 15, color: THEME.text.secondary },
+  actionsRow: { flexDirection: 'row', gap: SIZES.sm },
+  actionTouchable: { flex: 1 },
+  actionContent: {
     alignItems: 'center',
-    marginBottom: SIZES.md,
+    paddingVertical: SIZES.sm,
+    borderRadius: SIZES.radius.md,
+    backgroundColor: THEME.surface.interactive,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: THEME.border.subtle,
   },
-  featuredContent: {
-    justifyContent: 'center',
-  },
-  featuredText: {
-    fontFamily: FONTS.medium,
-    fontSize: 16,
-    color: COLORS.text.primary,
-    opacity: 0.9,
-  },
-  featuredPlayBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.text.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  actionsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SIZES.xl,
-  },
-  actionTouchable: {
-    flex: 1,
-  },
-  actionCard: {
-    flex: 1,
-    marginHorizontal: 4,
-    paddingVertical: SIZES.md,
-    alignItems: 'center',
-  },
-  actionIconPlaceholder: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginBottom: 8,
+  actionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: SIZES.xs,
+    backgroundColor: THEME.surface.selected,
   },
-  actionText: {
-    fontFamily: FONTS.regular,
-    fontSize: 10,
-    color: COLORS.text.secondary,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.sm,
-    paddingHorizontal: SIZES.xs,
-  },
-  sectionTitle: {
-    fontFamily: FONTS.medium,
-    fontSize: 18,
-    color: COLORS.text.primary,
-  },
-  seeAll: {
-    fontFamily: FONTS.regular,
-    fontSize: 12,
-    color: COLORS.text.secondary,
-  },
-  listContainer: {
-    marginBottom: SIZES.xl,
-  },
-  emptyCard: {
-    padding: SIZES.md,
-  },
-  emptyText: {
-    fontFamily: FONTS.medium,
-    fontSize: 14,
-    color: COLORS.text.primary,
-  },
-  emptyHint: {
-    fontFamily: FONTS.regular,
-    fontSize: 12,
-    color: COLORS.text.secondary,
-    marginTop: 4,
-  },
+  actionText: { fontFamily: FONTS.medium, fontSize: 11, color: THEME.text.secondary },
+  pinnedRow: { paddingRight: SIZES.md },
+  pinnedItem: { width: 132, marginRight: SIZES.md },
+  pinnedArtwork: { width: 132, height: 132, borderRadius: SIZES.radius.md, backgroundColor: THEME.surface.interactive },
+  pinnedFallback: { backgroundColor: THEME.accent.softPrimary },
+  pinnedTitle: { marginTop: SIZES.sm, fontFamily: FONTS.medium, fontSize: 14, color: THEME.text.primary },
+  pinnedMeta: { marginTop: 2, fontFamily: FONTS.regular, fontSize: 12, color: THEME.text.secondary },
+  listContainer: { marginBottom: SIZES.xl },
+  emptyState: { padding: SIZES.md, borderRadius: SIZES.radius.md },
+  emptyTitle: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.text.primary },
+  emptyCopy: { marginTop: SIZES.xs, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, color: THEME.text.secondary },
 });

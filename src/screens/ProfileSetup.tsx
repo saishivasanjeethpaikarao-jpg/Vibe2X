@@ -63,7 +63,7 @@ export default function ProfileSetupScreen() {
             value={name}
             onChangeText={setName}
             placeholder="Your name"
-            placeholderTextColor={COLORS.text.muted}
+            placeholderTextColor={COLORS.text.secondary}
             autoCapitalize="words"
             autoCorrect={false}
             returnKeyType="done"
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.regular,
     fontSize: 11,
     letterSpacing: 3,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     marginBottom: SIZES.md,
   },
   title: {
@@ -141,7 +141,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.regular,
     fontSize: 11,
     letterSpacing: 2,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     marginBottom: SIZES.sm,
   },
   labelSpaced: {

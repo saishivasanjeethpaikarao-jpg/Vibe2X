@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Keyboard,
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,12 +8,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Check, Heart, ListMusic, Plus, X, Ban } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../../constants/theme';
 import { Track } from '../../core/types';
 import { useLibrary } from '../../hooks/useLibrary';
 import { suppressTrack } from '../../core/lie';
+import { LiquidSheet } from '../liquid/LiquidSheet';
 
 type Props = {
   /** The track being filed. Null closes the sheet. */
@@ -30,7 +29,6 @@ type Props = {
  * know about it.
  */
 export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
-  const insets = useSafeAreaInsets();
   const {
     playlists,
     addToPlaylist,
@@ -100,23 +98,14 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
   }, [newName, track, createPlaylist, close]);
 
   return (
-    <Modal
+    <LiquidSheet
       visible={track !== null}
-      transparent
-      animationType="slide"
-      onRequestClose={close}
+      onClose={close}
+      keyboardOffset={keyboardHeight}
+      accessibilityLabel="Add to playlist"
     >
-      <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={close} />
-
       <View
-        style={[
-          styles.sheet,
-          {
-            paddingBottom:
-              keyboardHeight > 0 ? SIZES.lg : insets.bottom + SIZES.lg,
-            bottom: keyboardHeight,
-          },
-        ]}
+        style={styles.content}
       >
         <View style={styles.header}>
           <View style={styles.headerText}>
@@ -127,7 +116,12 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
               </Text>
             )}
           </View>
-          <TouchableOpacity onPress={close} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+          <TouchableOpacity
+            style={styles.closeButton}
+            onPress={close}
+            accessibilityRole="button"
+            accessibilityLabel="Close add to playlist"
+          >
             <X color={COLORS.text.secondary} size={22} />
           </TouchableOpacity>
         </View>
@@ -139,16 +133,19 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
               value={newName}
               onChangeText={setNewName}
               placeholder="Playlist name"
-              placeholderTextColor={COLORS.text.muted}
+              placeholderTextColor={COLORS.text.secondary}
               autoFocus
               returnKeyType="done"
               onSubmitEditing={createAndAdd}
               maxLength={60}
+              accessibilityLabel="New playlist name"
             />
             <TouchableOpacity
               style={[styles.createButton, !newName.trim() && styles.disabled]}
               onPress={createAndAdd}
               disabled={!newName.trim()}
+              accessibilityRole="button"
+              accessibilityLabel="Create playlist and add track"
             >
               <Text style={styles.createButtonText}>Create</Text>
             </TouchableOpacity>
@@ -158,6 +155,8 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
             style={styles.row}
             activeOpacity={0.7}
             onPress={() => setCreating(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Create new playlist"
           >
             <View style={styles.rowIcon}>
               <Plus color={COLORS.text.primary} size={20} />
@@ -172,6 +171,9 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
             style={styles.row}
             activeOpacity={0.7}
             onPress={() => track && toggleLike(track)}
+            accessibilityRole="button"
+            accessibilityLabel={liked ? 'Remove from liked songs' : 'Add to liked songs'}
+            accessibilityState={{ selected: liked }}
           >
             <View style={styles.rowIcon}>
               <Heart
@@ -193,6 +195,8 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
                 close();
               }
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Do not play this track"
           >
             <View style={styles.rowIcon}>
               <Ban color={COLORS.text.primary} size={20} />
@@ -209,6 +213,9 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
                 style={styles.row}
                 activeOpacity={0.7}
                 onPress={() => toggleIn(playlist.id, alreadyIn)}
+                accessibilityRole="button"
+                accessibilityLabel={`${alreadyIn ? 'Remove from' : 'Add to'} ${playlist.name}`}
+                accessibilityState={{ selected: alreadyIn }}
               >
                 <View style={styles.rowIcon}>
                   <ListMusic color={COLORS.text.primary} size={20} />
@@ -234,31 +241,13 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
           )}
         </ScrollView>
       </View>
-    </Modal>
+    </LiquidSheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
+  content: {
     maxHeight: '75%',
-    backgroundColor: COLORS.surfaceRaised,
-    borderTopLeftRadius: SIZES.radius.lg,
-    borderTopRightRadius: SIZES.radius.lg,
-    borderTopWidth: 1,
-    borderColor: COLORS.glassBorder,
-    paddingTop: SIZES.lg,
-    paddingHorizontal: SIZES.md,
   },
   header: {
     flexDirection: 'row',
@@ -269,6 +258,13 @@ const styles = StyleSheet.create({
   headerText: {
     flex: 1,
     marginRight: SIZES.md,
+  },
+  closeButton: {
+    width: 48,
+    height: 48,
+    marginTop: -SIZES.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontFamily: FONTS.bold,
@@ -321,6 +317,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    minHeight: SIZES.touchTarget,
     fontFamily: FONTS.medium,
     fontSize: 16,
     color: COLORS.text.primary,
@@ -330,6 +327,8 @@ const styles = StyleSheet.create({
     paddingVertical: SIZES.sm + 4,
   },
   createButton: {
+    minHeight: SIZES.touchTarget,
+    justifyContent: 'center',
     paddingHorizontal: SIZES.md,
     paddingVertical: SIZES.sm + 4,
     borderRadius: SIZES.radius.sm,

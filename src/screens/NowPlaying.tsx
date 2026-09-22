@@ -1,50 +1,59 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Image,
+  ScrollView,
   StyleSheet,
   Text,
-  View,
-  Image,
   TouchableOpacity,
-  Dimensions,
-  ActivityIndicator,
-  ScrollView,
+  View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, Heart, Play, Pause, SkipBack, SkipForward, Repeat, Repeat1, Shuffle, RotateCcw, RotateCw, MonitorSpeaker, Timer, ListMusic, ListPlus, X } from 'lucide-react-native';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, SIZES, FONTS } from '../constants/theme';
-import { PlaybackSourceSheet } from '../components/player/PlaybackSourceSheet';
-import { SleepTimerSheet } from '../components/player/SleepTimerSheet';
-import { SeekBar } from '../components/player/SeekBar';
-import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
-import { Track } from '../core/types';
-import { usePlayer } from '../hooks/usePlayer';
-import { useLibrary } from '../hooks/useLibrary';
+import {
+  ChevronDown,
+  Heart,
+  ListMusic,
+  ListPlus,
+  MonitorSpeaker,
+  Pause,
+  Play,
+  Repeat,
+  Repeat1,
+  RotateCcw,
+  RotateCw,
+  Shuffle,
+  SkipBack,
+  SkipForward,
+  Timer,
+} from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
-
-const { width } = Dimensions.get('window');
-
-/** Seconds -> m:ss, for the progress labels. */
-const formatTime = (seconds: number): string => {
-  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
-  const total = Math.floor(seconds);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-};
-
 import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
   runOnJS,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withSpring,
+  withTiming,
 } from 'react-native-reanimated';
-import { PanGestureHandler, PanGestureHandlerGestureEvent, PanGestureHandlerStateChangeEvent } from 'react-native-gesture-handler';
+import { PanGestureHandler } from 'react-native-gesture-handler';
+import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
+import { ArtworkAtmosphere } from '../components/liquid/ArtworkAtmosphere';
+import { GlassSurface } from '../components/liquid/GlassSurface';
+import { PressableScale } from '../components/liquid/PressableScale';
+import { PlaybackSourceSheet } from '../components/player/PlaybackSourceSheet';
+import { SeekBar } from '../components/player/SeekBar';
+import { SleepTimerSheet } from '../components/player/SleepTimerSheet';
+import { COLORS, FONTS, SIZES, THEME, TYPE } from '../constants/theme';
+import { Track } from '../core/types';
+import { useLibrary } from '../hooks/useLibrary';
+import { usePlayer } from '../hooks/usePlayer';
 
 export default function NowPlayingScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const { width } = useWindowDimensions();
+  const reducedMotion = useReducedMotion();
   const {
     currentTrack,
     isPlaying,
@@ -63,221 +72,234 @@ export default function NowPlayingScreen() {
     cycleRepeat,
     upcoming,
     queueContext,
-    jumpTo,
-    removeFromQueue,
     canPlayCurrent,
     sleepTimerExpiration,
     setSleepTimer,
   } = usePlayer();
-
   const { isLiked, toggleLike } = useLibrary();
   const [showSource, setShowSource] = useState(false);
   const [showSleepTimer, setShowSleepTimer] = useState(false);
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
-
-  // Gesture handling state
   const translateX = useSharedValue(0);
 
   const onGestureEvent = (event: any) => {
-    translateX.value = event.nativeEvent.translationX;
+    translateX.value = reducedMotion ? 0 : event.nativeEvent.translationX;
   };
 
   const onGestureEnd = (event: any) => {
     const { translationX, velocityX } = event.nativeEvent;
-    
-    // Swipe left (next)
-    if (translationX < -60 || velocityX < -500) {
-      translateX.value = withSpring(-width, { velocity: velocityX }, () => {
-        runOnJS(next)();
-        translateX.value = width; // Reset to the right for the next track sliding in
-        translateX.value = withSpring(0);
-      });
-    } 
-    // Swipe right (previous)
-    else if (translationX > 60 || velocityX > 500) {
-      translateX.value = withSpring(width, { velocity: velocityX }, () => {
-        runOnJS(previous)();
-        translateX.value = -width; // Reset to the left for the previous track sliding in
-        translateX.value = withSpring(0);
-      });
-    } 
-    // Snap back
-    else {
-      translateX.value = withSpring(0);
+    const goNext = translationX < -60 || velocityX < -500;
+    const goPrevious = translationX > 60 || velocityX > 500;
+    if (!goNext && !goPrevious) {
+      translateX.value = reducedMotion ? 0 : withSpring(0, { damping: 18, stiffness: 210 });
+      return;
     }
+
+    const action = goNext ? next : previous;
+    if (reducedMotion) {
+      action();
+      translateX.value = 0;
+      return;
+    }
+
+    translateX.value = withTiming(goNext ? -width : width, { duration: 180 }, () => {
+      runOnJS(action)();
+      translateX.value = goNext ? width : -width;
+      translateX.value = withSpring(0, { damping: 19, stiffness: 220 });
+    });
   };
 
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [{ translateX: translateX.value }],
-    };
-  });
-
+  const artworkStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
   if (!currentTrack) return null;
 
   const liked = isLiked(currentTrack.id);
   const busy = isLoading || isBuffering;
-
+  const artworkSize = Math.min(width - SIZES.lg * 2, 420);
 
   return (
     <View style={styles.container}>
-      {/* Background artwork blur */}
-      <Image
-        source={{ uri: currentTrack.albumImageUrl }}
-        style={StyleSheet.absoluteFill}
-        blurRadius={100}
-      />
-      <LinearGradient
-        colors={['rgba(5, 7, 7, 0.4)', COLORS.background]}
-        locations={[0, 0.7]}
-        style={StyleSheet.absoluteFill}
-      />
-
-      <ScrollView 
-        contentContainerStyle={[styles.content, { paddingTop: insets.top, paddingBottom: insets.bottom + SIZES.md }]}
+      <ArtworkAtmosphere artworkUrl={currentTrack.albumImageUrl} intensity="hero" />
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + SIZES.sm, paddingBottom: insets.bottom + SIZES.lg },
+        ]}
         showsVerticalScrollIndicator={false}
       >
-
-        {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIcon}>
-            <ChevronDown color={COLORS.text.primary} size={28} />
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.headerButton}
+            accessibilityRole="button"
+            accessibilityLabel="Close now playing"
+          >
+            <ChevronDown color={THEME.text.primary} size={26} />
           </TouchableOpacity>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.headerSub}>PLAYING FROM</Text>
-            <Text style={styles.headerTitle} numberOfLines={1}>
-              {queueContext || 'VIBE²X'}
-            </Text>
+          <View style={styles.headerCopy}>
+            <Text style={styles.sourceLabel}>Playing from</Text>
+            <Text style={styles.sourceTitle} numberOfLines={1}>{queueContext || 'Vibe2X'}</Text>
           </View>
           <TouchableOpacity
-            style={styles.headerIcon}
+            style={styles.headerButton}
             onPress={() => setAddingTrack(currentTrack)}
+            accessibilityRole="button"
+            accessibilityLabel="Add track to playlist"
           >
-            <ListPlus color={COLORS.text.primary} size={24} />
+            <ListPlus color={THEME.text.primary} size={23} />
           </TouchableOpacity>
         </View>
 
-        {/* Artwork with Swiping */}
-        <PanGestureHandler onGestureEvent={onGestureEvent} onEnded={onGestureEnd} activeOffsetX={[-10, 10]}>
-          <Animated.View style={[styles.artworkContainer, animatedStyle]}>
-            <Image source={{ uri: currentTrack.albumImageUrl }} style={styles.artwork} />
+        <PanGestureHandler
+          onGestureEvent={onGestureEvent}
+          onEnded={onGestureEnd}
+          activeOffsetX={[-12, 12]}
+        >
+          <Animated.View
+            style={[
+              styles.artworkFrame,
+              { width: artworkSize, height: artworkSize },
+              artworkStyle,
+            ]}
+          >
+            <Image
+              source={{ uri: currentTrack.albumImageUrl }}
+              style={styles.artwork}
+              accessibilityLabel={`Artwork for ${currentTrack.title}`}
+            />
           </Animated.View>
         </PanGestureHandler>
 
-        {/* Track Info */}
-        <View style={styles.infoContainer}>
-          <View style={styles.textInfo}>
-            <Text style={styles.trackTitle} numberOfLines={1}>{currentTrack.title}</Text>
+        <View style={styles.trackInfo}>
+          <View style={styles.trackCopy}>
+            <Text style={styles.trackTitle} numberOfLines={2}>{currentTrack.title}</Text>
             <Text style={styles.trackArtist} numberOfLines={1}>{currentTrack.artist.name}</Text>
           </View>
-          <TouchableOpacity onPress={() => toggleLike(currentTrack)}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={() => toggleLike(currentTrack)}
+            accessibilityRole="button"
+            accessibilityLabel={liked ? 'Remove from liked songs' : 'Add to liked songs'}
+            accessibilityState={{ selected: liked }}
+          >
             <Heart
-              color={liked ? COLORS.accent.magenta : COLORS.text.primary}
-              fill={liked ? COLORS.accent.magenta : 'transparent'}
-              size={28}
+              color={liked ? THEME.accent.secondary : THEME.text.primary}
+              fill={liked ? THEME.accent.secondary : 'transparent'}
+              size={27}
             />
           </TouchableOpacity>
         </View>
 
-        {/* Progress. SeekBar owns its own measurement, gesture handling and
-            position subscription, so this screen no longer re-renders on every
-            playback tick. */}
         <SeekBar onSeek={seekTo} />
 
-        {/* Error state -- never leaves the player stuck */}
         {error && (
-          <TouchableOpacity activeOpacity={0.8} onPress={retry} style={styles.errorBanner}>
+          <TouchableOpacity
+            activeOpacity={0.82}
+            onPress={retry}
+            style={styles.errorBanner}
+            accessibilityRole="button"
+            accessibilityLabel={`${error}. Tap to retry playback.`}
+          >
             <Text style={styles.errorText} numberOfLines={2}>{error}</Text>
             <Text style={styles.errorHint}>Tap to retry</Text>
           </TouchableOpacity>
         )}
 
-        {/* Relative seek, mirroring the lock-screen +/-10s buttons. */}
-        <View style={styles.seekRow}>
-          <TouchableOpacity style={styles.seekButton} onPress={() => seekBy(-10)}>
-            <RotateCcw color={COLORS.text.secondary} size={22} />
-            <Text style={styles.seekLabel}>10</Text>
+        <View style={styles.transport}>
+          <TouchableOpacity
+            style={styles.transportButton}
+            onPress={toggleShuffle}
+            accessibilityRole="button"
+            accessibilityLabel={shuffle ? 'Turn shuffle off' : 'Turn shuffle on'}
+            accessibilityState={{ selected: shuffle }}
+          >
+            <Shuffle color={shuffle ? THEME.accent.secondary : THEME.text.secondary} size={23} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.seekButton} onPress={() => seekBy(10)}>
-            <RotateCw color={COLORS.text.secondary} size={22} />
-            <Text style={styles.seekLabel}>10</Text>
+          <TouchableOpacity style={styles.transportButton} onPress={previous} accessibilityLabel="Previous track">
+            <SkipBack color={THEME.text.primary} size={30} fill={THEME.text.primary} />
           </TouchableOpacity>
-        </View>
-
-        {/* Main Controls */}
-        <View style={styles.controlsContainer}>
-          <TouchableOpacity onPress={toggleShuffle}>
-            <Shuffle color={shuffle ? COLORS.accent.magenta : COLORS.text.secondary} size={24} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={previous}>
-            <SkipBack color={COLORS.text.primary} size={32} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.playButton} onPress={togglePlayPause}>
+          <PressableScale
+            onPress={togglePlayPause}
+            accessibilityRole="button"
+            accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
+            contentStyle={styles.playButton}
+            pressedScale={0.96}
+          >
             {busy ? (
-              <ActivityIndicator color={COLORS.background} />
+              <ActivityIndicator color={THEME.text.inverse} />
             ) : isPlaying ? (
-              <Pause color={COLORS.background} size={32} fill={COLORS.background} />
+              <Pause color={THEME.text.inverse} size={32} fill={THEME.text.inverse} />
             ) : (
-              <Play color={COLORS.background} size={32} fill={COLORS.background} />
+              <Play color={THEME.text.inverse} size={32} fill={THEME.text.inverse} />
             )}
+          </PressableScale>
+          <TouchableOpacity style={styles.transportButton} onPress={next} accessibilityLabel="Next track">
+            <SkipForward color={THEME.text.primary} size={30} fill={THEME.text.primary} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={next}>
-            <SkipForward color={COLORS.text.primary} size={32} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={cycleRepeat}>
+          <TouchableOpacity
+            style={styles.transportButton}
+            onPress={cycleRepeat}
+            accessibilityRole="button"
+            accessibilityLabel={`Repeat mode ${repeat}`}
+            accessibilityState={{ selected: repeat !== 'off' }}
+          >
             {repeat === 'one' ? (
-              <Repeat1 color={COLORS.accent.magenta} size={24} />
+              <Repeat1 color={THEME.accent.secondary} size={23} />
             ) : (
-              <Repeat
-                color={repeat === 'all' ? COLORS.accent.magenta : COLORS.text.secondary}
-                size={24}
-              />
+              <Repeat color={repeat === 'all' ? THEME.accent.secondary : THEME.text.secondary} size={23} />
             )}
           </TouchableOpacity>
         </View>
 
-        {/* Bottom Actions */}
-        <View style={styles.bottomActions}>
-          <TouchableOpacity onPress={() => setShowSource(true)}>
-            <MonitorSpeaker
-              color={canPlayCurrent ? COLORS.text.secondary : COLORS.accent.red}
-              size={24}
-            />
+        <View style={styles.seekShortcuts}>
+          <TouchableOpacity style={styles.seekButton} onPress={() => seekBy(-10)} accessibilityLabel="Seek back 10 seconds">
+            <RotateCcw color={THEME.text.secondary} size={20} />
+            <Text style={styles.seekLabel}>10 sec</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setShowSleepTimer(true)}>
-            <Timer color={sleepTimerExpiration ? COLORS.accent.magenta : COLORS.text.secondary} size={24} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => (navigation as any).navigate('Queue')}>
-            <ListMusic
-              color={COLORS.text.secondary}
-              size={24}
-            />
+          <TouchableOpacity style={styles.seekButton} onPress={() => seekBy(10)} accessibilityLabel="Seek forward 10 seconds">
+            <RotateCw color={THEME.text.secondary} size={20} />
+            <Text style={styles.seekLabel}>10 sec</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Up Next Preview */}
-        {upcoming.length > 0 && (
-          <TouchableOpacity 
-            style={styles.upNextPreview}
+        <GlassSurface strength="strong" style={styles.utilities}>
+          <UtilityButton
+            label="Source"
+            Icon={MonitorSpeaker}
+            active={!canPlayCurrent}
+            onPress={() => setShowSource(true)}
+          />
+          <UtilityButton
+            label="Timer"
+            Icon={Timer}
+            active={Boolean(sleepTimerExpiration)}
+            onPress={() => setShowSleepTimer(true)}
+          />
+          <UtilityButton
+            label="Queue"
+            Icon={ListMusic}
             onPress={() => (navigation as any).navigate('Queue')}
-            activeOpacity={0.8}
+          />
+        </GlassSurface>
+
+        {upcoming.length > 0 && (
+          <PressableScale
+            onPress={() => (navigation as any).navigate('Queue')}
+            accessibilityRole="button"
+            accessibilityLabel={`Open queue, ${upcoming.length} tracks up next`}
+            contentStyle={styles.upNext}
           >
             <View style={styles.upNextHeader}>
-              <Text style={styles.upNextLabel}>Up Next</Text>
+              <Text style={styles.upNextLabel}>Up next</Text>
               <Text style={styles.upNextCount}>{upcoming.length} tracks</Text>
             </View>
-            <Text style={styles.upNextTitle} numberOfLines={1}>
-              {upcoming[0].title} <Text style={styles.upNextArtist}>• {upcoming[0].artist.name}</Text>
-            </Text>
-          </TouchableOpacity>
+            <Text style={styles.upNextTitle} numberOfLines={1}>{upcoming[0].title}</Text>
+            <Text style={styles.upNextArtist} numberOfLines={1}>{upcoming[0].artist.name}</Text>
+          </PressableScale>
         )}
-
-        </ScrollView>
+      </ScrollView>
 
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
-
       <PlaybackSourceSheet visible={showSource} onClose={() => setShowSource(false)} />
-
       <SleepTimerSheet
         visible={showSleepTimer}
         onClose={() => setShowSleepTimer(false)}
@@ -288,168 +310,93 @@ export default function NowPlayingScreen() {
   );
 }
 
+function UtilityButton({
+  label,
+  Icon,
+  active = false,
+  onPress,
+}: {
+  label: string;
+  Icon: typeof MonitorSpeaker;
+  active?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={styles.utilityButton} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
+      <Icon color={active ? THEME.accent.secondary : THEME.text.secondary} size={22} />
+      <Text style={[styles.utilityLabel, active && styles.utilityLabelActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  content: {
-    flexGrow: 1,
-    paddingHorizontal: SIZES.lg,
-    justifyContent: 'space-between',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.lg,
-  },
-  headerIcon: {
-    padding: SIZES.xs,
-  },
-  headerTextContainer: {
-    alignItems: 'center',
-  },
-  headerSub: {
-    fontFamily: FONTS.medium,
-    fontSize: 10,
-    letterSpacing: 1,
-    color: COLORS.text.secondary,
-    marginBottom: 2,
-  },
-  headerTitle: {
-    fontFamily: FONTS.medium,
-    fontSize: 14,
-    color: COLORS.text.primary,
-  },
-  artworkContainer: {
-    width: width - SIZES.lg * 2,
-    height: width - SIZES.lg * 2,
-    borderRadius: SIZES.radius.md,
-    overflow: 'hidden',
+  container: { flex: 1, backgroundColor: THEME.background.primary },
+  content: { flexGrow: 1, paddingHorizontal: SIZES.lg },
+  header: { minHeight: 56, flexDirection: 'row', alignItems: 'center', marginBottom: SIZES.lg },
+  headerButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  headerCopy: { flex: 1, alignItems: 'center', paddingHorizontal: SIZES.sm },
+  sourceLabel: { ...TYPE.caption, textTransform: 'uppercase', letterSpacing: 1.2, color: THEME.text.secondary },
+  sourceTitle: { marginTop: 2, fontFamily: FONTS.medium, fontSize: 14, color: THEME.text.primary },
+  artworkFrame: {
     alignSelf: 'center',
-    elevation: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.5,
-    shadowRadius: 30,
+    overflow: 'hidden',
+    borderRadius: 22,
+    backgroundColor: THEME.surface.interactive,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.36,
+    shadowRadius: 22,
+    elevation: 11,
     marginBottom: SIZES.xl,
   },
-  artwork: {
-    width: '100%',
-    height: '100%',
-  },
-  infoContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.lg,
-  },
-  textInfo: {
-    flex: 1,
-    paddingRight: SIZES.md,
-  },
-  trackTitle: {
-    fontFamily: FONTS.medium,
-    fontSize: 24,
-    color: COLORS.text.primary,
-    marginBottom: 4,
-  },
-  trackArtist: {
-    fontFamily: FONTS.regular,
-    fontSize: 16,
-    color: COLORS.text.secondary,
-  },
-  seekRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: SIZES.xxl,
-    marginBottom: SIZES.md,
-  },
-  seekButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SIZES.xs,
-    paddingVertical: SIZES.xs,
-    paddingHorizontal: SIZES.sm,
-  },
-  seekLabel: {
-    fontFamily: FONTS.medium,
-    fontSize: 12,
-    color: COLORS.text.secondary,
-  },
-  controlsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SIZES.xl,
-    paddingHorizontal: SIZES.sm,
-  },
+  artwork: { width: '100%', height: '100%' },
+  trackInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: SIZES.lg },
+  trackCopy: { flex: 1, paddingRight: SIZES.sm },
+  trackTitle: { ...TYPE.title, fontFamily: FONTS.bold, color: THEME.text.primary, letterSpacing: -0.35 },
+  trackArtist: { marginTop: SIZES.xs, fontFamily: FONTS.regular, fontSize: 16, color: THEME.text.secondary },
+  iconButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  transport: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: SIZES.md },
+  transportButton: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
   playButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: COLORS.text.primary,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: THEME.text.primary,
   },
-  bottomActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: SIZES.xl,
-    marginBottom: SIZES.xl,
-  },
-  errorBanner: {
-    backgroundColor: COLORS.accent.redGlow,
-    borderRadius: SIZES.radius.sm,
-    borderWidth: 1,
-    borderColor: COLORS.accent.red,
-    padding: SIZES.sm,
-    marginBottom: SIZES.md,
-  },
-  errorText: {
-    fontFamily: FONTS.medium,
-    fontSize: 13,
-    color: COLORS.text.primary,
-  },
-  errorHint: {
-    fontFamily: FONTS.regular,
-    fontSize: 11,
-    color: COLORS.text.secondary,
-    marginTop: 2,
-  },
-  upNextPreview: {
-    backgroundColor: COLORS.surfaceRaised,
+  seekShortcuts: { flexDirection: 'row', justifyContent: 'center', gap: SIZES.xxl, marginTop: SIZES.sm },
+  seekButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: SIZES.xs, paddingHorizontal: SIZES.sm },
+  seekLabel: { fontFamily: FONTS.medium, fontSize: 12, color: THEME.text.secondary },
+  utilities: {
+    minHeight: 76,
+    marginTop: SIZES.md,
     borderRadius: SIZES.radius.md,
-    padding: SIZES.sm,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
-  },
-  upNextHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    justifyContent: 'space-around',
   },
-  upNextLabel: {
-    fontFamily: FONTS.medium,
-    fontSize: 12,
-    color: COLORS.text.secondary,
+  utilityButton: { minWidth: 76, minHeight: 60, alignItems: 'center', justifyContent: 'center' },
+  utilityLabel: { marginTop: 4, fontFamily: FONTS.medium, fontSize: 11, color: THEME.text.secondary },
+  utilityLabelActive: { color: THEME.accent.secondary },
+  errorBanner: {
+    marginTop: SIZES.sm,
+    marginBottom: SIZES.sm,
+    padding: SIZES.sm,
+    borderRadius: SIZES.radius.sm,
+    backgroundColor: THEME.accent.softDanger,
   },
-  upNextCount: {
-    fontFamily: FONTS.regular,
-    fontSize: 11,
-    color: COLORS.text.muted,
+  errorText: { fontFamily: FONTS.medium, fontSize: 13, color: THEME.text.primary },
+  errorHint: { marginTop: 2, fontFamily: FONTS.regular, fontSize: 12, color: THEME.text.secondary },
+  upNext: {
+    marginTop: SIZES.md,
+    padding: SIZES.md,
+    borderRadius: SIZES.radius.md,
+    backgroundColor: THEME.surface.interactive,
   },
-  upNextTitle: {
-    fontFamily: FONTS.medium,
-    fontSize: 14,
-    color: COLORS.text.primary,
-  },
-  upNextArtist: {
-    fontFamily: FONTS.regular,
-    fontSize: 13,
-    color: COLORS.text.secondary,
-  },
+  upNextHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: SIZES.xs },
+  upNextLabel: { fontFamily: FONTS.medium, fontSize: 13, color: THEME.text.secondary },
+  upNextCount: { fontFamily: FONTS.regular, fontSize: 12, color: THEME.text.secondary },
+  upNextTitle: { fontFamily: FONTS.medium, fontSize: 15, color: THEME.text.primary },
+  upNextArtist: { marginTop: 2, fontFamily: FONTS.regular, fontSize: 13, color: THEME.text.secondary },
 });

@@ -53,17 +53,21 @@ export const RootNavigator = () => {
         <Stack.Screen
           name="ImportPlaylist"
           component={ImportPlaylistScreen}
-          options={{ presentation: 'modal' }}
+          options={{ presentation: 'modal', animation: 'fade_from_bottom' }}
         />
         <Stack.Screen 
           name="NowPlaying" 
           component={NowPlayingScreen} 
-          options={{ presentation: 'fullScreenModal' }}
+          options={{ presentation: 'fullScreenModal', animation: 'fade_from_bottom' }}
         />
         <Stack.Screen 
           name="Queue" 
           component={QueueScreen} 
-          options={{ presentation: 'fullScreenModal' }}
+          options={{
+            presentation: 'transparentModal',
+            animation: 'slide_from_bottom',
+            contentStyle: { backgroundColor: 'transparent' },
+          }}
         />
       </Stack.Navigator>
     </NavigationContainer>

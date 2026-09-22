@@ -4,10 +4,26 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { RootNavigator } from './src/navigation/RootNavigator';
-import { PlayerProvider } from './src/hooks/usePlayer';
-import { LibraryProvider } from './src/hooks/useLibrary';
+import { PlayerProvider, usePlayer } from './src/hooks/usePlayer';
+import { LibraryProvider, useLibrary } from './src/hooks/useLibrary';
 import { COLORS } from './src/constants/theme';
 import { getPlatformInfo, isNoteNativeAvailable } from './modules/note-native';
+import { LaunchExperience } from './src/components/liquid/LaunchExperience';
+
+function AppShell() {
+  const { isLoaded } = useLibrary();
+  const { isReady: isPlayerReady } = usePlayer();
+
+  return (
+    <View style={styles.webWrapper}>
+      <View style={styles.appContainer}>
+        <RootNavigator />
+        <StatusBar style="light" />
+        <LaunchExperience appReady={isLoaded && isPlayerReady} />
+      </View>
+    </View>
+  );
+}
 
 export default function App() {
   // Proof-of-connection for the Android native module. Dev-only, no UI impact.
@@ -27,12 +43,7 @@ export default function App() {
       <SafeAreaProvider>
         <LibraryProvider>
           <PlayerProvider>
-            <View style={styles.webWrapper}>
-              <View style={styles.appContainer}>
-                <RootNavigator />
-                <StatusBar style="light" />
-              </View>
-            </View>
+            <AppShell />
           </PlayerProvider>
         </LibraryProvider>
       </SafeAreaProvider>

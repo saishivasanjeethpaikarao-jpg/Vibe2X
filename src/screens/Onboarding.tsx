@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontSize: 10,
     letterSpacing: 3,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     marginTop: SIZES.md,
     opacity: 0.8,
   },
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontSize: 10,
     letterSpacing: 2,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     lineHeight: 16,
   }
 });

@@ -14,6 +14,9 @@ export const Pill: React.FC<PillProps> = ({ label, isActive, onPress, style }) =
     <TouchableOpacity 
       activeOpacity={0.7}
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: Boolean(isActive) }}
+      accessibilityLabel={label}
       style={[
         styles.container,
         isActive ? styles.activeContainer : styles.inactiveContainer,
@@ -32,6 +35,7 @@ export const Pill: React.FC<PillProps> = ({ label, isActive, onPress, style }) =
 
 const styles = StyleSheet.create({
   container: {
+    minHeight: 48,
     paddingHorizontal: SIZES.md,
     paddingVertical: SIZES.sm,
     borderRadius: SIZES.radius.pill,

@@ -5,15 +5,14 @@ import {
   View,
   TextInput,
   TouchableOpacity,
-  Modal,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
 import { X, Check, Trash2 } from 'lucide-react-native';
-import { BlurView } from 'expo-blur';
 import { COLORS, SIZES, FONTS } from '../../constants/theme';
 import { probe } from '../../core/http';
 import { useLibrary } from '../../hooks/useLibrary';
+import { LiquidSheet } from '../liquid/LiquidSheet';
 
 type EndpointKind = 'invidious' | 'piped' | 'custom';
 
@@ -85,14 +84,16 @@ export const PlaybackSourceSheet: React.FC<{ visible: boolean; onClose: () => vo
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-
-        <BlurView intensity={40} tint="dark" style={styles.sheet}>
+    <LiquidSheet visible={visible} onClose={onClose} accessibilityLabel="Playback source">
+        <View style={styles.content}>
           <View style={styles.header}>
             <Text style={styles.title}>Playback source</Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onClose}
+              accessibilityRole="button"
+              accessibilityLabel="Close playback source"
+            >
               <X color={COLORS.text.secondary} size={20} />
             </TouchableOpacity>
           </View>
@@ -108,6 +109,9 @@ export const PlaybackSourceSheet: React.FC<{ visible: boolean; onClose: () => vo
                 key={k}
                 style={[styles.kindChip, kind === k && styles.kindChipActive]}
                 onPress={() => setKind(k)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: kind === k }}
+                accessibilityLabel={`${k} source type`}
               >
                 <Text style={[styles.kindText, kind === k && styles.kindTextActive]}>{k}</Text>
               </TouchableOpacity>
@@ -118,15 +122,22 @@ export const PlaybackSourceSheet: React.FC<{ visible: boolean; onClose: () => vo
             <TextInput
               style={styles.input}
               placeholder="https://your-instance.example"
-              placeholderTextColor={COLORS.text.muted}
+              placeholderTextColor={COLORS.text.secondary}
               value={url}
               onChangeText={setUrl}
               onSubmitEditing={add}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
+              accessibilityLabel="Playback source URL"
             />
-            <TouchableOpacity style={styles.addButton} onPress={add} disabled={checking}>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={add}
+              disabled={checking}
+              accessibilityRole="button"
+              accessibilityLabel="Add playback source"
+            >
               {checking ? (
                 <ActivityIndicator size="small" color={COLORS.background} />
               ) : (
@@ -147,40 +158,39 @@ export const PlaybackSourceSheet: React.FC<{ visible: boolean; onClose: () => vo
                     <Text style={styles.rowUrl} numberOfLines={1}>{e.url}</Text>
                     <Text style={styles.rowKind}>{e.kind}</Text>
                   </View>
-                  <TouchableOpacity onPress={() => remove(e.url)}>
+                  <TouchableOpacity
+                    style={styles.removeButton}
+                    onPress={() => remove(e.url)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${e.url}`}
+                  >
                     <Trash2 color={COLORS.text.muted} size={18} />
                   </TouchableOpacity>
                 </View>
               ))
             )}
           </ScrollView>
-        </BlurView>
-      </View>
-    </Modal>
+        </View>
+    </LiquidSheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  sheet: {
-    backgroundColor: COLORS.surface,
-    borderTopLeftRadius: SIZES.radius.lg,
-    borderTopRightRadius: SIZES.radius.lg,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
-    padding: SIZES.lg,
-    paddingBottom: SIZES.xl,
-    overflow: 'hidden',
+  content: {
+    paddingHorizontal: SIZES.sm,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: SIZES.sm,
+  },
+  closeButton: {
+    width: 48,
+    height: 48,
+    marginTop: -SIZES.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   title: {
     fontFamily: FONTS.medium,
@@ -199,8 +209,9 @@ const styles = StyleSheet.create({
     marginBottom: SIZES.sm,
   },
   kindChip: {
+    minHeight: SIZES.touchTarget,
     paddingHorizontal: SIZES.md,
-    paddingVertical: 6,
+    justifyContent: 'center',
     borderRadius: SIZES.radius.pill,
     backgroundColor: COLORS.glass,
     borderWidth: 1,
@@ -225,7 +236,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    height: 44,
+    height: SIZES.touchTarget,
     fontFamily: FONTS.regular,
     fontSize: 14,
     color: COLORS.text.primary,
@@ -237,8 +248,8 @@ const styles = StyleSheet.create({
   },
   addButton: {
     marginLeft: SIZES.sm,
-    width: 44,
-    height: 44,
+    width: SIZES.touchTarget,
+    height: SIZES.touchTarget,
     borderRadius: SIZES.radius.sm,
     backgroundColor: COLORS.text.primary,
     alignItems: 'center',
@@ -257,7 +268,7 @@ const styles = StyleSheet.create({
   empty: {
     fontFamily: FONTS.regular,
     fontSize: 13,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
   },
   row: {
     flexDirection: 'row',
@@ -278,7 +289,13 @@ const styles = StyleSheet.create({
   rowKind: {
     fontFamily: FONTS.regular,
     fontSize: 11,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     marginTop: 2,
+  },
+  removeButton: {
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

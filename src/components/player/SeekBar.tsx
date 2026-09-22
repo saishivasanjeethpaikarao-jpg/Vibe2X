@@ -125,9 +125,18 @@ export const SeekBar: React.FC<SeekBarProps> = ({ onSeek }) => {
     <View style={styles.container}>
       <View
         style={styles.barBg}
-        hitSlop={{ top: 20, bottom: 20, left: 0, right: 0 }}
+        hitSlop={{ top: 22, bottom: 22, left: 0, right: 0 }}
         onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
         {...panResponder.panHandlers}
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel="Playback position"
+        accessibilityValue={{ min: 0, max: Math.round(safeDuration), now: Math.round(shown), text: `${formatTime(shown)} of ${formatTime(safeDuration)}` }}
+        accessibilityActions={[{ name: 'increment', label: 'Seek forward 10 seconds' }, { name: 'decrement', label: 'Seek back 10 seconds' }]}
+        onAccessibilityAction={(event) => {
+          const delta = event.nativeEvent.actionName === 'increment' ? 10 : -10;
+          onSeek(Math.min(safeDuration, Math.max(0, shown + delta)));
+        }}
       >
         <View style={[styles.barFill, { width: percent }]} />
         <View

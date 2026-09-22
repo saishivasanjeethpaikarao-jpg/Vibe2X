@@ -113,7 +113,7 @@ export default function SettingsScreen() {
             onBlur={commitName}
             onSubmitEditing={commitName}
             placeholder="Your name"
-            placeholderTextColor={COLORS.text.muted}
+            placeholderTextColor={COLORS.text.secondary}
             returnKeyType="done"
             maxLength={40}
           />
@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontSize: 10,
     letterSpacing: 2.5,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     marginTop: SIZES.lg,
     marginBottom: SIZES.sm,
     marginHorizontal: SIZES.md,
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.regular,
     fontSize: 10,
     letterSpacing: 2,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     marginBottom: SIZES.sm,
   },
   fieldLabelSpaced: {
@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.medium,
     fontSize: 10,
     letterSpacing: 3,
-    color: COLORS.text.muted,
+    color: COLORS.text.secondary,
     textAlign: 'center',
     marginTop: SIZES.xxl,
   },
