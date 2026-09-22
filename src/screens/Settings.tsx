@@ -167,7 +167,7 @@ export default function SettingsScreen() {
         {/* ---- Legal ---- */}
         <Text style={styles.sectionLabel}>LICENCE</Text>
         <View style={styles.card}>
-          <Text style={styles.legalTitle}>VIBE²X (fork of NØTE)</Text>
+          <Text style={styles.legalTitle}>VIBE²X</Text>
           <Text style={styles.legalBody}>
             Original Copyright © 2026 Sanyam Jain.{'\n\n'}
             This program is free software: you can redistribute it and/or modify it

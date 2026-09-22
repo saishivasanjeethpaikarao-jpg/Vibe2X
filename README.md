@@ -5,7 +5,7 @@
 
 **Find your vibe. Play it your way.**
 
-An open-source, local-first music player for Android, forked from NØTE.
+An open-source, local-first music player for Android.
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-7B2CFF.svg)](LICENSE)
 [![Platform: Android](https://img.shields.io/badge/platform-Android-3DDC84.svg)](#build-from-source)
@@ -184,7 +184,7 @@ If your environment supports Android builds, also run `assembleDebug` from a fre
 
 Vibe2X is licensed under the **GNU General Public License, version 3 or (at your option) any later version**. See [LICENSE](LICENSE) and [COPYRIGHT](COPYRIGHT).
 
-Vibe2X is a fork of **NØTE**, originally created by **Sanyam Jain**. The original NØTE attribution and copyright are preserved in [COPYRIGHT](COPYRIGHT).
+Vibe2X includes code originally created for **NØTE** by **Sanyam Jain**. The original attribution and copyright are preserved in [COPYRIGHT](COPYRIGHT).
 
 The Android native module links **NewPipe Extractor v0.26.5**, copyright Team NewPipe and contributors, under GPL-3.0-or-later. Vibe2X is not affiliated with or endorsed by Team NewPipe, Google, YouTube, or Spotify. Spotify names and marks belong to Spotify AB. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for notices and dependency details.
 

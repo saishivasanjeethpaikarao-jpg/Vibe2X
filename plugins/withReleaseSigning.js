@@ -3,7 +3,7 @@ const { withAppBuildGradle, withDangerousMod } = require('expo/config-plugins');
 const fs = require('fs');
 
 /**
- * Signs release builds with NØTE's own keystore instead of the debug key.
+ * Signs Vibe2X release builds with the configured keystore instead of the debug key.
  *
  * The Expo template points the release buildType at signingConfigs.debug and
  * says so in a comment. A debug-signed APK installs fine, but the debug key is
@@ -106,7 +106,7 @@ function withSigningConfig(config, credentials) {
     contents = contents.replace(
       releaseAnchor,
       [
-        '            // Signed with NØTE’s own keystore via withReleaseSigning.',
+        '            // Signed with the configured Vibe2X keystore via withReleaseSigning.',
         '            signingConfig signingConfigs.release',
       ].join('\n')
     );

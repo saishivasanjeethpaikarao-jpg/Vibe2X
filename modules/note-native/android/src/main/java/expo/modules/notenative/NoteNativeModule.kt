@@ -25,7 +25,7 @@ import org.schabi.newpipe.extractor.stream.StreamType
 import java.io.IOException
 
 /**
- * NØTE's Android-only native surface.
+ * Vibe2X's Android-only native surface.
  *
  * Only two things are exposed to JavaScript: a platform probe, and a single
  * stream-resolution call. The NewPipe Extractor API itself is deliberately NOT
@@ -134,7 +134,7 @@ class NoteNativeModule : Module() {
 
   /**
    * Map extractor and transport failures onto a small closed set of reasons the
-   * TypeScript layer converts into NØTE's existing AppError kinds.
+   * TypeScript layer converts into Vibe2X's existing AppError kinds.
    *
    * The original message is always carried through -- nothing is swallowed.
    */

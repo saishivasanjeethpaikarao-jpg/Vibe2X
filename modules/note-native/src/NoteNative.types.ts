@@ -10,7 +10,7 @@ export type PlatformInfo = {
 
 /**
  * Why a native resolve failed. A closed set -- the TypeScript layer maps each
- * of these onto one of NØTE's existing AppError kinds.
+ * of these onto one of Vibe2X's existing AppError kinds.
  */
 export type NativeStreamFailureReason =
   | 'invalid_id'

@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-NØTE incorporates the following third-party components. Their copyright
+Vibe2X incorporates the following third-party components. Their copyright
 holders and license terms are reproduced or referenced below. Nothing in this
 file transfers ownership: each component remains the work of its authors.
 
@@ -29,13 +29,13 @@ source has been modified. The NewPipe *application* is not used or included —
 only the extractor library.
 
 `modules/note-native/android/src/main/java/expo/modules/notenative/NoteNativeDownloader.kt`
-is original NØTE code written against the extractor's public `Downloader`
+is application code originally written by Sanyam Jain against the extractor's public `Downloader`
 abstract class. It is not derived from NewPipe's own `DownloaderImpl`.
 
 ### Licensing consequence — resolved
 
 GPL-3.0-or-later is a copyleft license, so the combined work is also
-GPL-3.0-or-later. NØTE is therefore licensed GPL-3.0-or-later; see the root
+GPL-3.0-or-later. Vibe2X is therefore licensed GPL-3.0-or-later; see the root
 `LICENSE` file. The MIT text that previously sat there came from the Expo
 project template and did not describe this combined work.
 
@@ -55,7 +55,7 @@ by Expo (© 650 Industries, Inc.) under the **MIT License**.
 
 That MIT notice is reproduced in `modules/note-native/LICENSE` in acknowledgement
 of the scaffold's origin. It covers the generated boilerplate only. The original
-NØTE code in that directory — including `NoteNativeModule.kt` and
+application code in that directory — including `NoteNativeModule.kt` and
 `NoteNativeDownloader.kt` — is the work of Sanyam Jain and is licensed
 GPL-3.0-or-later along with the rest of this project.
 

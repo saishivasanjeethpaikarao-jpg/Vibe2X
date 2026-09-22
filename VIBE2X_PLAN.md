@@ -1,7 +1,7 @@
 # VIBE²X Architecture and Project Plan
 
 ## Existing Architecture Summary
-Vibe2X (formerly NØTE) uses a strictly layered architecture to separate UI from playback and stream resolution:
+Vibe2X uses a strictly layered architecture to separate UI from playback and stream resolution:
 `UI -> MusicService -> ProviderAdapter -> TrackResolver -> PlaybackEngine`
 
 The app is built with Expo (React Native) and uses an Android-native module (`note-native`) for resolving playable audio streams using the NewPipe Extractor.
@@ -37,10 +37,10 @@ The `PlaybackEngine` manages a single audio session using `expo-audio`. `MusicSe
 Note: Requires Node.js 20+, JDK 17+, and Android SDK.
 
 ## Vibe2X Rebranding Changes Made
-- **App Name & Slug**: Changed from "NOTE" to "Vibe2X" in `app.json` and `package.json`.
+- **App Name & Slug**: Uses "Vibe2X" consistently in `app.json` and `package.json`.
 - **Brand Colors**: Replaced the subtle Spotify-like green accent with the VIBE²X electric magenta (`#D000FF`) and electric violet (`#7000FF`) accents across the app (`theme.ts`, `NowPlaying.tsx`, `TrackRow.tsx`, `AddToPlaylistSheet.tsx`).
-- **UI Labels**: Updated "NØTE" mentions to "VIBE²X" in `NowPlaying`, `Search`, `Library`, `Settings`, and `PlaybackSourceSheet`.
-- **Attribution**: Retained all legally required GPL-3.0-or-later references, explicitly noting VIBE²X as a fork of NØTE and preserving original copyrights.
+- **UI Labels**: Uses "VIBE²X" consistently in `NowPlaying`, `Search`, `Library`, `Settings`, and `PlaybackSourceSheet`.
+- **Attribution**: Retains all legally required GPL-3.0-or-later references and original copyrights while presenting Vibe2X as its own product.
 
 ## Potential Technical Risks
 - **Upstream Breakage**: The NewPipe Extractor may break if YouTube changes its API, requiring an update to the `note-native` dependency.
@@ -58,7 +58,7 @@ Note: Requires Node.js 20+, JDK 17+, and Android SDK.
 - Original copyright notices (e.g., "Copyright © 2026 Sanyam Jain" and "Team NewPipe") must be preserved in the Settings screen and `LICENSE`/`COPYRIGHT` files.
 
 ## Phased Feature Roadmap
-- **Phase 1: Foundation (Current)** - Establish the Vibe2X fork, implement the new brand identity (dark-first, magenta/violet accents), and verify the build process without breaking existing playback.
+- **Phase 1: Foundation (Current)** - Establish the Vibe2X brand identity (dark-first, magenta/violet accents) and verify the build process without breaking existing playback.
 - **Phase 2: Enhanced Discovery** - Implement advanced sorting, filtering, and personalized recommendations within the Library and Search screens.
 - **Phase 3: Social & Sharing** - Add features to export/import playlists easily or share currently playing tracks to social platforms (using standard Android intents, no backend required).
 - **Phase 4: Audio Enhancements** - Introduce a local equalizer or visualizer, leveraging the `expo-audio` or native APIs, keeping the "play it your way" ethos.
