@@ -121,8 +121,8 @@ export class Queue {
     if (this.position < 0) this.position = this.tracks.length ? 0 : -1;
   }
 
-  /** Append to the end of the queue. */
-  add(tracks: Track | Track[]): void {
+  /** Append explicit items before any automatically suggested tail. Returns the number added. */
+  add(tracks: Track | Track[]): number {
     const incoming = Array.isArray(tracks) ? tracks : [tracks];
     const seen = new Set(this.tracks.map((t) => t.id));
     const fresh = incoming.filter((t) => {
@@ -130,14 +130,23 @@ export class Queue {
       seen.add(t.id); // also dedupes within the incoming batch
       return true;
     });
-    if (!fresh.length) return;
+    if (!fresh.length) return 0;
 
     const firstNew = this.tracks.length;
     this.tracks.push(...fresh);
-    // Appended tracks go at the end of the play order, shuffled or not.
-    for (let i = 0; i < fresh.length; i++) this.order.push(firstNew + i);
+    // Manually queued items must play before Smart Continue suggestions while
+    // keeping the order of successive swipes. Automatic batches remain last.
+    const firstAuto = this.order.findIndex(
+      (trackIndex, position) =>
+        position > this.position && this.tracks[trackIndex]?.isAutoSuggested
+    );
+    const insertAt = fresh.every((track) => track.isAutoSuggested) || firstAuto < 0
+      ? this.order.length
+      : firstAuto;
+    this.order.splice(insertAt, 0, ...fresh.map((_, index) => firstNew + index));
 
     if (this.position < 0 && this.order.length) this.position = 0;
+    return fresh.length;
   }
 
   /** Insert directly after the current track. */
@@ -334,14 +343,20 @@ export class Queue {
     }
 
     const rest = pinFirst === undefined ? indices : indices.filter((i) => i !== pinFirst);
+    const manual = rest.filter((i) => !this.tracks[i]?.isAutoSuggested);
+    const automatic = rest.filter((i) => this.tracks[i]?.isAutoSuggested);
 
-    // Fisher-Yates.
-    for (let i = rest.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [rest[i], rest[j]] = [rest[j], rest[i]];
+    // Shuffle within each group, never ahead of an explicitly queued track.
+    for (const group of [manual, automatic]) {
+      for (let i = group.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [group[i], group[j]] = [group[j], group[i]];
+      }
     }
 
-    this.order = pinFirst === undefined ? rest : [pinFirst, ...rest];
+    this.order = pinFirst === undefined
+      ? [...manual, ...automatic]
+      : [pinFirst, ...manual, ...automatic];
   }
 }
 

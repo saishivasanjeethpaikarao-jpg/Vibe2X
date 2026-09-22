@@ -48,6 +48,8 @@ import { COLORS, FONTS, SIZES, THEME, TYPE } from '../constants/theme';
 import { Track } from '../core/types';
 import { useLibrary } from '../hooks/useLibrary';
 import { usePlayer } from '../hooks/usePlayer';
+import { confirmLocalMutation } from '../core/confirmedMutation';
+import { useSnackbar } from '../components/common/SnackbarContext';
 
 export default function NowPlayingScreen() {
   const insets = useSafeAreaInsets();
@@ -77,6 +79,7 @@ export default function NowPlayingScreen() {
     setSleepTimer,
   } = usePlayer();
   const { isLiked, toggleLike } = useLibrary();
+  const { show } = useSnackbar();
   const [showSource, setShowSource] = useState(false);
   const [showSleepTimer, setShowSleepTimer] = useState(false);
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
@@ -137,7 +140,7 @@ export default function NowPlayingScreen() {
           </TouchableOpacity>
           <View style={styles.headerCopy}>
             <Text style={styles.sourceLabel}>Playing from</Text>
-            <Text style={styles.sourceTitle} numberOfLines={1}>{queueContext || 'Vibe2X'}</Text>
+            <Text style={styles.sourceTitle} numberOfLines={1}>{currentTrack.isAutoSuggested ? 'Smart Continue' : queueContext || 'Vibe2X'}</Text>
           </View>
           <TouchableOpacity
             style={styles.headerButton}
@@ -176,7 +179,18 @@ export default function NowPlayingScreen() {
           </View>
           <TouchableOpacity
             style={styles.iconButton}
-            onPress={() => toggleLike(currentTrack)}
+            onPress={async () => {
+              const wasLiked = isLiked(currentTrack.id);
+              try {
+                const saved = await confirmLocalMutation(
+                  () => toggleLike(currentTrack),
+                  () => show(wasLiked ? 'Unliked' : 'Liked')
+                );
+                if (!saved) show('Could not save liked songs');
+              } catch {
+                show('Could not save liked songs');
+              }
+            }}
             accessibilityRole="button"
             accessibilityLabel={liked ? 'Remove from liked songs' : 'Add to liked songs'}
             accessibilityState={{ selected: liked }}
@@ -289,7 +303,7 @@ export default function NowPlayingScreen() {
             contentStyle={styles.upNext}
           >
             <View style={styles.upNextHeader}>
-              <Text style={styles.upNextLabel}>Up next</Text>
+              <Text style={styles.upNextLabel}>{upcoming[0].isAutoSuggested ? 'Smart Continue' : 'Up next'}</Text>
               <Text style={styles.upNextCount}>{upcoming.length} tracks</Text>
             </View>
             <Text style={styles.upNextTitle} numberOfLines={1}>{upcoming[0].title}</Text>

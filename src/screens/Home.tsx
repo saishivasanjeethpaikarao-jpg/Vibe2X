@@ -25,6 +25,7 @@ import { FEATURED_QUERY, randomQueryFor } from '../data/catalog';
 import { useLibrary } from '../hooks/useLibrary';
 import { usePlayer } from '../hooks/usePlayer';
 import { MusicService } from '../services/MusicService';
+import { useSnackbar } from '../components/common/SnackbarContext';
 
 const LOGO = require('../../assets/icon.png');
 
@@ -51,7 +52,8 @@ export default function HomeScreen() {
     next,
     addToQueue,
   } = usePlayer();
-  const { recentlyPlayed, liked, playlists, profile } = useLibrary();
+  const { recentlyPlayed, playlists, profile } = useLibrary();
+  const { show: showSnackbar } = useSnackbar();
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [starter, setStarter] = useState<Track[]>([]);
   const [starterError, setStarterError] = useState(false);
@@ -83,13 +85,16 @@ export default function HomeScreen() {
     async (action: (typeof ACTIONS)[number]) => {
       const query = randomQueryFor(action.id) ?? action.query;
       if (query === null) {
-        if (liked.length) playTrack(liked[0], { tracks: liked, label: 'Liked Songs' });
+        (navigation as any).navigate('Playlist', { playlistId: 'liked' });
         return;
       }
       setPendingAction(action.id);
       try {
         const results = await MusicService.search(query, { limit: 25 });
-        if (!results.tracks.length) return;
+        if (!results.tracks.length) {
+          showSnackbar(`No ${action.label.toLowerCase()} tracks found`);
+          return;
+        }
         const shuffled = [...results.tracks];
         for (let i = shuffled.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -97,12 +102,12 @@ export default function HomeScreen() {
         }
         playTrack(shuffled[0], { tracks: shuffled, label: action.label });
       } catch {
-        // Keep the existing silent quick-action failure behavior.
+        showSnackbar('Could not load music. Try again.');
       } finally {
         setPendingAction(null);
       }
     },
-    [liked, playTrack]
+    [navigation, playTrack, showSnackbar]
   );
 
   const listTracks = useMemo(

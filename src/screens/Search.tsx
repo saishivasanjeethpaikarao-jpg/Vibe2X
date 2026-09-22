@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -25,6 +25,7 @@ import { SearchFilter, Track } from '../core/types';
 import { useSearch } from '../hooks/useSearch';
 import { usePlayer } from '../hooks/usePlayer';
 import { MusicService } from '../services/MusicService';
+import { singleSearchTrackContext } from './searchPlayback';
 import { useNavigation } from '@react-navigation/native';
 
 const FILTERS: SearchFilter[] = ['All', 'Songs', 'Artists', 'Albums', 'Playlists'];
@@ -61,17 +62,14 @@ export default function SearchScreen() {
 
   const isBrowsing = query.trim().length === 0;
 
-  /** Playing a search result queues the whole result list behind it. */
+  /** Playing a single search result starts only that track — no hidden queue. */
   const onPlayTrack = useCallback(
     (track: Track) => {
       // The result has been chosen; the user is done typing.
       Keyboard.dismiss();
-      playTrack(track, {
-        tracks: results.tracks,
-        label: `Search • ${results.query}`,
-      });
+      playTrack(track, singleSearchTrackContext(track, results.query));
     },
-    [playTrack, results.tracks, results.query]
+    [playTrack, results.query]
   );
 
   /** Tapping an album/playlist expands it and plays it as a queue. */

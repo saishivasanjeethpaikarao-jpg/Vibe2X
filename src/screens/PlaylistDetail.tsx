@@ -21,6 +21,7 @@ import { Track } from '../core/types';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { ArtworkAtmosphere } from '../components/liquid/ArtworkAtmosphere';
+import { LikedSongsCover } from '../components/common/LikedSongsCover';
 
 type PlaylistRouteParams = { playlistId: string };
 type PlaylistRoute = RouteProp<{ Playlist: PlaylistRouteParams }, 'Playlist'>;
@@ -141,7 +142,9 @@ export default function PlaylistDetailScreen() {
   const header = (
     <View style={styles.headerBlock}>
       <View style={styles.artworkWrap}>
-        {artworkUrl ? (
+        {playlist.id === 'liked' ? (
+          <LikedSongsCover size={210} empty={tracks.length === 0} style={styles.artwork} />
+        ) : artworkUrl ? (
           <Image source={{ uri: artworkUrl }} style={styles.artwork} />
         ) : (
           <View style={[styles.artwork, styles.artworkFallback]} />

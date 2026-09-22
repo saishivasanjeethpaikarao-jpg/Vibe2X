@@ -19,6 +19,7 @@ import { GlassCard } from '../components/common/GlassCard';
 import { TrackRow } from '../components/lists/TrackRow';
 import { MusicService } from '../services/MusicService';
 import { MiniPlayer } from '../components/player/MiniPlayer';
+import { LikedSongsCover } from '../components/common/LikedSongsCover';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { Playlist, Track } from '../core/types';
 import { usePlayer } from '../hooks/usePlayer';
@@ -291,7 +292,9 @@ export default function LibraryScreen() {
                 accessibilityLabel={`Open ${playlist.name}, ${playlist.tracks.length} tracks`}
                 accessibilityHint="Long press to play"
               >
-                {playlist.coverImageUrl && playlist.coverImageUrl !== 'liked_songs_gradient' ? (
+                {playlist.id === 'liked' ? (
+                  <LikedSongsCover size={64} empty={playlist.tracks.length === 0} style={styles.playlistImage} />
+                ) : playlist.coverImageUrl && playlist.coverImageUrl !== 'liked_songs_gradient' ? (
                   <Image source={{ uri: playlist.coverImageUrl }} style={styles.playlistImage} />
                 ) : (
                   <View style={[styles.playlistImage, styles.likedSongsGradient]} />

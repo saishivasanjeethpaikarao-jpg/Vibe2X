@@ -19,6 +19,7 @@ import { endpointSource } from '../providers/stream/StreamResolver';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 import { getSuppressedTrackIds, getRecentTrackIds } from '../core/lie';
+import { chooseSmartContinue, mayStartSmartContinue } from '../playback/smartContinue';
 
 type PlayerContextType = {
   // --- core player state used by every screen ---
@@ -51,7 +52,7 @@ type PlayerContextType = {
   queue: Track[];
   upcoming: Track[];
   queueContext: string;
-  addToQueue: (tracks: Track | Track[]) => void;
+  addToQueue: (tracks: Track | Track[]) => boolean;
   playNext: (tracks: Track | Track[]) => void;
   removeFromQueue: (trackId: string) => void;
   reorderQueue: (from: number, to: number) => void;
@@ -112,6 +113,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [queueVersion, setQueueVersion] = useState(0);
   const [volume, setVolumeState] = useState(1);
   const [sleepTimerExpiration, setSleepTimerExpiration] = useState<number | null>(null);
+  const sleepTimerUntil = useRef<number | null>(null);
 
   /** Cancels an in-flight load when the user starts another one. */
   const loadAbort = useRef<AbortController | null>(null);
@@ -238,14 +240,16 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     playbackEngine.on('onStatus', (s) => setStatus(s));
 
     playbackEngine.on('onComplete', () => {
+      if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return;
       // `auto` so repeat-one replays rather than advances.
       const nextTrack = queueRef.current.next(true);
       bumpQueue();
       persistQueue();
 
       if (!nextTrack) {
-        // End of queue: optionally keep going with related tracks.
-        void extendWithRelated();
+        // The only automatic continuation path: a completed current track
+        // with no explicit upcoming item. Manual Next never starts it.
+        void continueFromLocalLibrary();
         return;
       }
       void loadCurrent({ autoPlay: true });
@@ -263,51 +267,58 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const extendWithRelated = useCallback(async () => {
+  const continueFromLocalLibrary = useCallback(async () => {
     const settings = LibraryService.getSettings();
     const last = queueRef.current.current;
 
-    if (!settings.autoplayRelated || !last) return;
+    if (!last || !mayStartSmartContinue({
+      trackCompleted: true,
+      hasUpcoming: queueRef.current.upcoming.length > 0,
+      enabled: settings.autoplayRelated,
+      sleepTimerExpired: Boolean(sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current),
+    })) return;
 
     // Capture the current load so we can bail if the user picks new music
     // while the network request is in flight.
     const id = loadId.current;
 
     try {
-      const [related, suppressed, recent] = await Promise.all([
-        MusicService.getRelated(last),
+      const [suppressed, recent] = await Promise.all([
         getSuppressedTrackIds(),
-        getRecentTrackIds(12), // 12 hour repetition penalty window
+        getRecentTrackIds(12),
       ]);
 
-      // Context changed while we were fetching — discard these suggestions.
-      if (loadId.current !== id) return;
+      if (loadId.current !== id || queueRef.current.current?.id !== last.id) return;
+      if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return;
+      if (queueRef.current.upcoming.length) {
+        queueRef.current.next(false);
+        bumpQueue();
+        persistQueue();
+        void loadCurrent({ autoPlay: true });
+        return;
+      }
 
-      // Filter out suppressed tracks and already queued tracks
-      let fresh = related.filter((t) => 
-        !queueRef.current.items.some((q) => q.id === t.id) && 
-        !suppressed.has(t.id)
+      const excluded = new Set([
+        ...queueRef.current.items.map((track) => track.id),
+        ...suppressed,
+        ...recent,
+      ]);
+      const fresh = chooseSmartContinue(
+        last,
+        LibraryService.getHistory(),
+        LibraryService.getLiked(),
+        excluded
       );
-
-      // Score-based sorting (demote recently played tracks)
-      fresh.sort((a, b) => {
-        const aPenalty = recent.has(a.id) ? 1 : 0;
-        const bPenalty = recent.has(b.id) ? 1 : 0;
-        return aPenalty - bPenalty; 
-      });
-
-      fresh = fresh.map((t) => ({ ...t, isAutoSuggested: true }));
-      
       if (!fresh.length) return;
 
-      queueRef.current.add(fresh.slice(0, 20));
+      queueRef.current.add(fresh);
       const nextTrack = queueRef.current.next(false);
       bumpQueue();
       persistQueue();
 
       if (nextTrack) void loadCurrent({ autoPlay: true });
     } catch {
-      // Autoplay is a convenience; silence is the right failure mode.
+      // Smart Continue is optional; a local-history failure ends playback.
     }
   }, [bumpQueue, loadCurrent, persistQueue]);
 
@@ -456,12 +467,9 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     bumpQueue();
     persistQueue();
 
-    if (!nextTrack) {
-      void extendWithRelated();
-      return;
-    }
+    if (!nextTrack) return;
     void loadCurrent({ autoPlay: true });
-  }, [bumpQueue, extendWithRelated, loadCurrent, persistQueue]);
+  }, [bumpQueue, loadCurrent, persistQueue]);
 
   const previous = useCallback(() => {
     // Standard behaviour: restart the track if we are more than 3s in.
@@ -509,6 +517,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, []);
 
   const setSleepTimer = useCallback((minutes: number | null) => {
+    sleepTimerUntil.current = minutes === null ? null : Date.now() + minutes * 60000;
     playbackEngine.setSleepTimer(minutes);
   }, []);
 
@@ -528,11 +537,13 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const addToQueue = useCallback(
     (tracks: Track | Track[]) => {
       const wasEmpty = queueRef.current.length === 0;
-      queueRef.current.add(tracks);
+      const added = queueRef.current.add(tracks);
+      if (!added) return false;
       bumpQueue();
       persistQueue();
 
       if (wasEmpty) void loadCurrent({ autoPlay: true });
+      return true;
     },
     [bumpQueue, loadCurrent, persistQueue]
   );

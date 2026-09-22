@@ -29,7 +29,7 @@ The following capabilities are implemented in the current source:
 - Liked tracks, local playlists, imported provider playlists, pinning, renaming, and deletion.
 - On-device audio scanning through Android MediaLibrary permissions.
 - Recently played items, listening history, search history, and persisted playback position.
-- Related-track autoplay with local suppression and recent-play penalties.
+- Local Smart Continue candidate selection from listening history and liked tracks, subject to recent-play and suppression exclusions. Runtime behavior is awaiting device retest.
 - Local profile/settings storage and JSON library-backup export.
 
 These are source-level capabilities, not a claim that every device, Android version, provider response, or network condition has been tested. See [Verification status](#verification-status).
@@ -147,6 +147,8 @@ Spotify requires a developer application and user authorization. Vibe2X uses Aut
 3. Copy `.env.example` to `.env.local` and set `EXPO_PUBLIC_SPOTIFY_CLIENT_ID` to the application's public client ID.
 4. Rebuild the native app; OAuth schemes are native configuration and cannot be added by an over-the-air update.
 
+For the `android-qa.yml` GitHub Actions build, set the repository variable **`EXPO_PUBLIC_SPOTIFY_CLIENT_ID`** in Settings → Secrets and variables → Actions → Variables (or supply the same environment variable to a local build). The workflow passes this public identifier into Expo's bundle step. It is not a secret; anyone can inspect it in a distributed APK. Never put a Spotify Client Secret or token in that variable. If it is unset, the QA APK still builds and displays the existing "Spotify import is not configured in this build" message. Register `vibe2x-spotify://oauth/callback` for the same Spotify application before testing OAuth.
+
 Never place a Spotify client secret, access token, or refresh token in the repository or APK. OAuth tokens are stored with `expo-secure-store` on the device and are not logged.
 
 Current Spotify Web API limits materially constrain this feature: playlist items are available only for playlists the signed-in user owns or collaborates on. Development Mode also requires the app owner to have Spotify Premium and limits access to allowlisted users and the account's quota. A `403` is therefore reported as a permissions/restriction error rather than bypassed with scraping. Vibe2X does not use private Spotify endpoints, embed scraping, hard-coded tokens, Spotify audio, or a client-secret backend.
@@ -163,7 +165,7 @@ The app does make network requests needed for search, metadata, playlist import,
 
 The repository includes deterministic Vitest coverage for playlist URL parsing, Spotify-to-Vibe2X matching, both providers' pagination, unavailable and duplicate rows, cancellation, mid-pagination failure, repeated imports, name collisions, and Spotify 401/403/quota handling. The playlist-import build has passed TypeScript, Expo Doctor, a clean Expo prebuild, and an Android production JavaScript bundle. A live read-only YouTube Music metadata probe followed all seven continuation pages of a 655-item playlist successfully.
 
-Spotify OAuth and Web API behavior has not been exercised with a real client ID/account in this repository. Native compilation and real-device UI behavior also remain unverified on this host because Gradle fails before project evaluation with `Unable to establish loopback connection`, and no device/emulator is connected. Playback, queue, background audio, notification controls, and provider streaming were not changed by playlist import, but still require device regression checks before release.
+The standalone Android QA APK has been tested on a real device. That test exposed first-launch NØTE branding, hidden Search-result continuation, a nonfunctional right-swipe queue action, an unreadable queue sheet, a rejected YouTube shared playlist, an unconfigured Spotify client ID, and missing mutation feedback. This branch contains repair candidates for those observations; successful tests or a new APK build do not establish that the repairs work on a device. Spotify OAuth and Web API import remain untested with a real client ID/account. Background playback, lock-screen controls, notifications, and persistence also require a fresh regression pass on the repaired APK.
 
 ## Contributing
 

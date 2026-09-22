@@ -385,7 +385,7 @@ export default function ImportPlaylistScreen() {
             <View style={styles.detectedRow}>
               <Text style={styles.detectedLabel}>Detected source</Text>
               <Text style={[styles.detectedValue, !parsed && url ? styles.invalidText : null]}>
-                {parsed ? (parsed.source === 'spotify' ? 'Spotify' : 'YouTube') : url ? 'Unsupported link' : '—'}
+                {parsed ? (parsed.source === 'spotify' ? 'Spotify playlist detected ✓' : 'YouTube playlist detected ✓') : url ? 'Unsupported link' : '—'}
               </Text>
             </View>
 

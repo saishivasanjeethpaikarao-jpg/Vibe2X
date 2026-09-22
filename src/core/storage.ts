@@ -28,12 +28,15 @@ export async function readJson<T>(k: string, fallback: T): Promise<T> {
   }
 }
 
-export async function writeJson(k: string, value: unknown): Promise<void> {
+export async function writeJson(k: string, value: unknown): Promise<boolean> {
   try {
     pending.delete(k);
     await AsyncStorage.setItem(key(k), JSON.stringify(value));
+    return true;
   } catch {
-    // Storage full or unavailable -- persistence is best-effort by design.
+    // Keep the latest value pending so a later foreground/background flush can retry.
+    pending.set(k, value);
+    return false;
   }
 }
 
@@ -55,11 +58,12 @@ export function writeJsonDebounced(k: string, value: unknown, delayMs = 800): vo
 }
 
 /** Force every debounced write to land now (used on backgrounding). */
-export async function flushWrites(): Promise<void> {
+export async function flushWrites(): Promise<boolean> {
   const entries = [...pending.entries()];
   for (const [k, t] of timers) clearTimeout(t);
   timers.clear();
-  await Promise.all(entries.map(([k, v]) => writeJson(k, v)));
+  const results = await Promise.all(entries.map(([k, v]) => writeJson(k, v)));
+  return results.every(Boolean);
 }
 
 export async function removeKey(k: string): Promise<void> {

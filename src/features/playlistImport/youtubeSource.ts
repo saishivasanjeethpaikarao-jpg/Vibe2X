@@ -1,4 +1,4 @@
-import { appErrorWithMessage } from '../../core/errors';
+import { AppError, appErrorWithMessage } from '../../core/errors';
 import { Track } from '../../core/types';
 import { PlaylistPage } from '../../providers/TrackResolver';
 import {
@@ -31,7 +31,19 @@ export class YouTubePlaylistSource implements PlaylistSourceClient {
   ): Promise<SourcePlaylist> {
     if (signal.aborted) cancelled();
 
-    const first = await this.resolver.getPlaylist(parsed.playlistId, { signal });
+    let first: PlaylistPage;
+    try {
+      first = await this.resolver.getPlaylist(parsed.playlistId, { signal });
+    } catch (error) {
+      if (signal.aborted) cancelled();
+      if (error instanceof AppError && error.kind === 'invalid_playlist') {
+        throw appErrorWithMessage(
+          'invalid_playlist',
+          'This link was recognized, but YouTube did not expose a public playlist. Check that it is available in YouTube Music.'
+        );
+      }
+      throw error;
+    }
     const metadata = first.playlist;
     const tracks: Track[] = [];
     let unavailableCount = 0;

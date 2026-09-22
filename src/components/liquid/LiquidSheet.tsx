@@ -1,5 +1,5 @@
 import React from 'react';
-import { Modal, StyleProp, StyleSheet, TouchableOpacity, View, ViewStyle } from 'react-native';
+import { Modal, Platform, StyleProp, StyleSheet, TouchableOpacity, View, ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SIZES, THEME } from '../../constants/theme';
 import { GlassSurface } from './GlassSurface';
@@ -40,6 +40,7 @@ export function LiquidSheet({
               bottom: keyboardOffset,
               paddingBottom: keyboardOffset > 0 ? SIZES.lg : insets.bottom + SIZES.lg,
             },
+            Platform.OS === 'android' && styles.androidSheet,
             style,
           ]}
           accessibilityLabel={accessibilityLabel}
@@ -53,7 +54,7 @@ export function LiquidSheet({
 }
 
 const styles = StyleSheet.create({
-  modal: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.66)' },
+  modal: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.44)' },
   sheet: {
     position: 'absolute',
     left: 0,
@@ -66,6 +67,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
     backgroundColor: THEME.surface.glassStrong,
   },
+  androidSheet: { backgroundColor: THEME.surface.raised },
   handle: {
     width: 38,
     height: 4,

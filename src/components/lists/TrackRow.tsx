@@ -11,6 +11,8 @@ import { MoreVertical, ListPlus } from 'lucide-react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Track } from '../../core/types';
 import { COLORS, SIZES, FONTS, THEME } from '../../constants/theme';
+import { useSnackbar } from '../common/SnackbarContext';
+import { addFromQueueSwipe } from './queueSwipe';
 
 interface TrackRowProps {
   track: Track;
@@ -20,7 +22,7 @@ interface TrackRowProps {
   /** Shown while the row's target is being expanded or resolved. */
   isLoading?: boolean;
   onMorePress?: (track: Track) => void;
-  onSwipeRight?: (track: Track) => void;
+  onSwipeRight?: (track: Track) => boolean;
 }
 
 const TrackRowComponent: React.FC<TrackRowProps> = ({
@@ -37,6 +39,7 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
     [onMorePress, track]
   );
   const ReanimatedSwipeableRef = useRef<any>(null);
+  const { show } = useSnackbar();
 
   const renderLeftActions = () => (
     <View style={styles.swipeAction}>
@@ -45,8 +48,8 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
   );
 
   const onSwipeableOpen = (direction: 'left' | 'right') => {
-    if (direction === 'left' && onSwipeRight) {
-      onSwipeRight(track);
+    if (onSwipeRight && direction === 'right') {
+      if (addFromQueueSwipe(direction, track, onSwipeRight)) show('Added to queue');
       ReanimatedSwipeableRef.current?.close();
     }
   };

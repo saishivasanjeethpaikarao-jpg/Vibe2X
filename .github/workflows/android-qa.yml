@@ -18,6 +18,9 @@ jobs:
     name: Test and assemble standalone QA APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      # This is a public OAuth identifier, never a Client Secret or token.
+      EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
 
     steps:
       - name: Check out source

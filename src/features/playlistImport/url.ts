@@ -13,6 +13,24 @@ function safeUrl(input: string): URL | null {
   }
 }
 
+/** React Native's URL implementation can omit searchParams on some Android builds. */
+function queryValue(url: URL, key: string): string | null {
+  const fromSearchParams = url.searchParams?.get(key);
+  if (fromSearchParams !== undefined && fromSearchParams !== null) return fromSearchParams;
+  const query = url.search.replace(/^\?/, '');
+  for (const pair of query.split('&')) {
+    const separator = pair.indexOf('=');
+    if (separator < 0) continue;
+    try {
+      const name = decodeURIComponent(pair.slice(0, separator).replace(/\+/g, ' '));
+      if (name === key) return decodeURIComponent(pair.slice(separator + 1).replace(/\+/g, ' '));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function parsePlaylistUrl(input: string): ParsedPlaylistUrl | null {
   const value = input.trim();
 
@@ -47,7 +65,7 @@ export function parsePlaylistUrl(input: string): ParsedPlaylistUrl | null {
     host === 'youtu.be';
   if (!youtubeHost) return null;
 
-  const playlistId = url.searchParams.get('list') ?? '';
+  const playlistId = queryValue(url, 'list') ?? '';
   if (!YOUTUBE_LIST_ID.test(playlistId)) return null;
 
   return {
@@ -61,6 +79,6 @@ export function parsePlaylistUrl(input: string): ParsedPlaylistUrl | null {
 export function playlistUrlFromDeepLink(input: string): string | null {
   const url = safeUrl(input);
   if (!url || url.protocol !== 'vibe2x:' || url.hostname !== 'import') return null;
-  const shared = url.searchParams.get('url');
+  const shared = queryValue(url, 'url');
   return shared && parsePlaylistUrl(shared) ? shared : null;
 }

@@ -14,6 +14,8 @@ import { Track } from '../../core/types';
 import { useLibrary } from '../../hooks/useLibrary';
 import { suppressTrack } from '../../core/lie';
 import { LiquidSheet } from '../liquid/LiquidSheet';
+import { confirmLocalMutation } from '../../core/confirmedMutation';
+import { useSnackbar } from '../common/SnackbarContext';
 
 type Props = {
   /** The track being filed. Null closes the sheet. */
@@ -29,6 +31,7 @@ type Props = {
  * know about it.
  */
 export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
+  const { show } = useSnackbar();
   const {
     playlists,
     addToPlaylist,
@@ -77,25 +80,52 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
 
   /** Tapping a playlist toggles membership: add if absent, remove if present. */
   const toggleIn = useCallback(
-    (playlistId: string, alreadyIn: boolean) => {
+    async (playlistId: string, alreadyIn: boolean) => {
       if (!track) return;
-      if (alreadyIn) removeFromPlaylist(playlistId, track.id);
-      else addToPlaylist(playlistId, track);
+      const name = playlists.find((playlist) => playlist.id === playlistId)?.name;
+      if (!name) return;
+      try {
+        const saved = await confirmLocalMutation(
+          () => { if (alreadyIn) removeFromPlaylist(playlistId, track.id); else addToPlaylist(playlistId, track); },
+          () => { close(); show(`${alreadyIn ? 'Removed from' : 'Added to'} ${name}`); }
+        );
+        if (!saved) show('Could not save playlist change');
+      } catch {
+        show('Could not save playlist change');
+      }
     },
-    [track, addToPlaylist, removeFromPlaylist]
+    [track, playlists, addToPlaylist, removeFromPlaylist, close, show]
   );
 
-  const createAndAdd = useCallback(() => {
+  const createAndAdd = useCallback(async () => {
     const name = newName.trim();
     if (!name || !track) return;
 
     // Create it already containing the track, so this is one step not two.
-    createPlaylist(name, [track]);
-    Keyboard.dismiss();
-    setNewName('');
-    setCreating(false);
-    close();
-  }, [newName, track, createPlaylist, close]);
+    try {
+      const saved = await confirmLocalMutation(
+        () => { createPlaylist(name, [track]); },
+        () => { close(); show(`Added to ${name}`); }
+      );
+      if (!saved) show('Could not save playlist');
+    } catch {
+      show('Could not save playlist');
+    }
+  }, [newName, track, createPlaylist, close, show]);
+
+  const changeLike = useCallback(async () => {
+    if (!track) return;
+    const wasLiked = isLiked(track.id);
+    try {
+      const saved = await confirmLocalMutation(
+        () => toggleLike(track),
+        () => { close(); show(wasLiked ? 'Unliked' : 'Liked'); }
+      );
+      if (!saved) show('Could not save liked songs');
+    } catch {
+      show('Could not save liked songs');
+    }
+  }, [track, isLiked, toggleLike, close, show]);
 
   return (
     <LiquidSheet
@@ -170,7 +200,7 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
           <TouchableOpacity
             style={styles.row}
             activeOpacity={0.7}
-            onPress={() => track && toggleLike(track)}
+            onPress={changeLike}
             accessibilityRole="button"
             accessibilityLabel={liked ? 'Remove from liked songs' : 'Add to liked songs'}
             accessibilityState={{ selected: liked }}

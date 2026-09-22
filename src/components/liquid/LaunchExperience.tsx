@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Image, StyleSheet, Text } from 'react-native';
+import { Image, StyleSheet } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
+  withDelay,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { FONTS, MOTION, THEME } from '../../constants/theme';
@@ -24,6 +26,8 @@ export function LaunchExperience({ appReady }: Props) {
   const leftX = useSharedValue(-86);
   const rightX = useSharedValue(86);
   const markScale = useSharedValue(0.96);
+  const wordmarkOpacity = useSharedValue(0);
+  const wordmarkY = useSharedValue(12);
   const overlayOpacity = useSharedValue(1);
 
   useEffect(() => {
@@ -52,7 +56,20 @@ export function LaunchExperience({ appReady }: Props) {
 
       leftX.value = withTiming(0, { duration: settleDuration, easing: MOTION.easing.out });
       rightX.value = withTiming(0, { duration: settleDuration, easing: MOTION.easing.out });
-      markScale.value = withTiming(1, { duration: settleDuration, easing: MOTION.easing.out });
+      markScale.value = reducedMotion
+        ? 1
+        : withSequence(
+            withTiming(1.025, { duration: settleDuration, easing: MOTION.easing.out }),
+            withTiming(1, { duration: 100, easing: MOTION.easing.out })
+          );
+      wordmarkOpacity.value = withDelay(
+        reducedMotion ? 0 : Math.round(totalDuration * 0.35),
+        withTiming(1, { duration: reducedMotion ? 0 : 180, easing: MOTION.easing.out })
+      );
+      wordmarkY.value = withDelay(
+        reducedMotion ? 0 : Math.round(totalDuration * 0.35),
+        withTiming(0, { duration: reducedMotion ? 0 : 180, easing: MOTION.easing.out })
+      );
       deadlineTimer = setTimeout(() => setMinimumElapsed(true), waitBeforeFade);
 
       if (!seen) void AsyncStorage.setItem(LAUNCH_FLAG, 'seen').catch(() => undefined);
@@ -75,7 +92,7 @@ export function LaunchExperience({ appReady }: Props) {
       if (deadlineTimer) clearTimeout(deadlineTimer);
       if (storageFallbackTimer) clearTimeout(storageFallbackTimer);
     };
-  }, [leftX, markScale, reducedMotion, rightX]);
+  }, [leftX, markScale, reducedMotion, rightX, wordmarkOpacity, wordmarkY]);
 
   useEffect(() => {
     if (!appReady || !minimumElapsed || hidden) return;
@@ -92,6 +109,7 @@ export function LaunchExperience({ appReady }: Props) {
   const rightStyle = useAnimatedStyle(() => ({ transform: [{ translateX: rightX.value }] }));
   const markStyle = useAnimatedStyle(() => ({ transform: [{ scale: markScale.value }] }));
   const overlayStyle = useAnimatedStyle(() => ({ opacity: overlayOpacity.value }));
+  const wordmarkStyle = useAnimatedStyle(() => ({ opacity: wordmarkOpacity.value, transform: [{ translateY: wordmarkY.value }] }));
 
   if (hidden) return null;
 
@@ -113,7 +131,7 @@ export function LaunchExperience({ appReady }: Props) {
           <Image source={LOGO} style={styles.rightImage} resizeMode="contain" />
         </Animated.View>
       </Animated.View>
-      <Text style={styles.wordmark}>Vibe2X</Text>
+      <Animated.Text style={[styles.wordmark, wordmarkStyle]}>Vibe2X</Animated.Text>
     </Animated.View>
   );
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,29 +7,24 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, Music, Search, ListPlus } from 'lucide-react-native';
+import { ChevronDown, Music, Search, ListPlus, Sparkles, GripVertical } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS, THEME } from '../constants/theme';
 import { Track } from '../core/types';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { useNavigation } from '@react-navigation/native';
-
-/**
- * Queue sheet — replaces the broken 120px inline panel.
- *
- * Shows the currently playing track at the top, then a fully scrollable
- * "Up Next" list with remove buttons. Navigated to from NowPlaying or
- * directly via the queue icon.
- */
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 // @ts-ignore
 import Swipeable from 'react-native-gesture-handler/Swipeable';
-import { GripVertical, Sparkles } from 'lucide-react-native';
+
+type QueueItem =
+  | { type: 'header'; id: string; title: string }
+  | { type: 'track'; id: string; track: Track; originalIndex: number };
 
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { createPlaylist } = useLibrary();
+  const { createPlaylist, settings } = useLibrary();
   const {
     currentTrack,
     upcoming,
@@ -39,6 +34,24 @@ export default function QueueScreen() {
     clearQueue,
     reorderQueue,
   } = usePlayer();
+
+  const queueData = useMemo(() => {
+    const data: QueueItem[] = [];
+    const manual = upcoming.filter(t => !t.isAutoSuggested);
+    const auto = upcoming.filter(t => t.isAutoSuggested);
+
+    let trackIndex = 0;
+    if (manual.length > 0) {
+      data.push({ type: 'header', id: 'header-manual', title: 'Up next' });
+      data.push(...manual.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
+    }
+    if (auto.length > 0) {
+      data.push({ type: 'header', id: 'header-auto', title: 'Smart Continue' });
+      data.push(...auto.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
+    }
+    return data;
+  }, [upcoming]);
+  const manualCount = upcoming.filter((track) => !track.isAutoSuggested).length;
 
   const renderRightActions = (item: Track) => {
     return (
@@ -53,18 +66,33 @@ export default function QueueScreen() {
     );
   };
 
-  const renderUpcomingTrack = ({ item, drag, isActive, getIndex }: RenderItemParams<Track>) => {
-    const isAuto = item.isAutoSuggested;
-    const index = getIndex() ?? -1;
+  const renderUpcomingTrack = ({ item, drag, isActive, getIndex }: RenderItemParams<QueueItem>) => {
+    if (item.type === 'header') {
+      return (
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionLabel}>{item.title}</Text>
+          {item.id === 'header-auto' && (
+            <Sparkles size={14} color={COLORS.accent.violet} style={styles.sectionIcon} />
+          )}
+        </View>
+      );
+    }
+
+    const { track, originalIndex } = item;
+    const isAuto = track.isAutoSuggested;
+
+    const firstInSection = isAuto ? manualCount : 0;
+    const lastInSection = isAuto ? upcoming.length - 1 : manualCount - 1;
     const reorderActions = [
-      ...(index > 0 ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
-      ...(index >= 0 && index < upcoming.length - 1
+      ...(originalIndex > firstInSection ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
+      ...(originalIndex >= 0 && originalIndex < lastInSection
         ? [{ name: 'moveDown' as const, label: 'Move later' }]
         : []),
     ];
+
     return (
       <Swipeable
-        renderRightActions={() => renderRightActions(item)}
+        renderRightActions={() => renderRightActions(track)}
         overshootRight={false}
         containerStyle={{ overflow: 'visible' }}
       >
@@ -76,17 +104,16 @@ export default function QueueScreen() {
           <TouchableOpacity
             style={styles.trackRowMain}
             activeOpacity={0.7}
-            onPress={() => jumpTo(item.id)}
+            onPress={() => jumpTo(track.id)}
             accessibilityRole="button"
-            accessibilityLabel={`Play ${item.title} by ${item.artist.name}`}
+            accessibilityLabel={`Play ${track.title} by ${track.artist.name}`}
           >
-            <Image source={{ uri: item.albumImageUrl }} style={styles.trackThumb} />
+            <Image source={{ uri: track.albumImageUrl }} style={styles.trackThumb} />
             <View style={styles.trackInfo}>
               <View style={styles.titleRow}>
-                <Text style={styles.trackTitle} numberOfLines={1}>{item.title}</Text>
-                {isAuto && <Sparkles size={12} color={COLORS.accent.violet} style={{ marginLeft: 4 }} />}
+                <Text style={styles.trackTitle} numberOfLines={1}>{track.title}</Text>
               </View>
-              <Text style={styles.trackArtist} numberOfLines={1}>{item.artist.name}</Text>
+              <Text style={styles.trackArtist} numberOfLines={1}>{track.artist.name}</Text>
             </View>
           </TouchableOpacity>
           <TouchableOpacity
@@ -96,18 +123,18 @@ export default function QueueScreen() {
             activeOpacity={0.7}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             accessibilityRole="button"
-            accessibilityLabel={`Reorder ${item.title}`}
+            accessibilityLabel={`Reorder ${track.title}`}
             accessibilityHint="Long press and drag, or use accessibility actions"
             accessibilityActions={reorderActions}
             onAccessibilityAction={(event) => {
-              if (index < 0) return;
-              if (event.nativeEvent.actionName === 'moveUp' && index > 0) {
-                reorderQueue(index, index - 1);
+              if (originalIndex < 0) return;
+              if (event.nativeEvent.actionName === 'moveUp' && originalIndex > firstInSection) {
+                reorderQueue(originalIndex, originalIndex - 1);
               } else if (
                 event.nativeEvent.actionName === 'moveDown' &&
-                index < upcoming.length - 1
+                originalIndex < lastInSection
               ) {
-                reorderQueue(index, index + 1);
+                reorderQueue(originalIndex, originalIndex + 1);
               }
             }}
           >
@@ -144,7 +171,7 @@ export default function QueueScreen() {
           <View style={styles.headerCenter}>
             <Text style={styles.headerSub}>PLAYING FROM</Text>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {queueContext || 'VIBE²X'}
+              {currentTrack?.isAutoSuggested ? 'Smart Continue' : queueContext || 'Vibe2X'}
             </Text>
           </View>
           {upcoming.length > 0 ? (
@@ -198,15 +225,14 @@ export default function QueueScreen() {
           </View>
         )}
 
-        {/* Up Next */}
-        <Text style={styles.sectionLabel}>Up next</Text>
-
         {upcoming.length === 0 ? (
           <View style={styles.emptyState}>
             <Music color={COLORS.text.muted} size={48} />
             <Text style={styles.emptyTitle}>Your queue is empty</Text>
             <Text style={styles.emptySubtitle}>
-              Search for songs to add to your queue
+              {settings.autoplayRelated
+                ? 'No tracks queued. Smart Continue may add music after this track finishes.'
+                : 'Search for songs to add to your queue.'}
             </Text>
             <TouchableOpacity
               style={styles.emptyButton}
@@ -224,14 +250,30 @@ export default function QueueScreen() {
           </View>
         ) : (
           <DraggableFlatList
-            data={upcoming}
+            data={queueData}
             renderItem={renderUpcomingTrack}
-            keyExtractor={(item, index) => `${item.id}-${index}`}
+            keyExtractor={(item) => item.id}
             style={styles.list}
             contentContainerStyle={{ paddingBottom: insets.bottom + SIZES.xxl }}
             showsVerticalScrollIndicator={false}
-            onDragEnd={({ from, to }) => {
-              if (from !== to) reorderQueue(from, to);
+            onDragEnd={({ data: newData, from, to }) => {
+              if (from === to) return;
+
+              const oldTracks = queueData.filter(x => x.type === 'track');
+              const newTracks = newData.filter(x => x.type === 'track');
+
+              const movedItem = queueData[from];
+              if (movedItem.type === 'header') return; // Should not happen since no drag handle for header
+
+              const originalFrom = oldTracks.findIndex(t => t.id === movedItem.id);
+              const originalTo = newTracks.findIndex(t => t.id === movedItem.id);
+              const staysInSection = movedItem.track.isAutoSuggested
+                ? originalTo >= manualCount
+                : originalTo < manualCount;
+
+              if (staysInSection && originalFrom !== -1 && originalTo !== -1 && originalFrom !== originalTo) {
+                reorderQueue(originalFrom, originalTo);
+              }
             }}
           />
         )}
@@ -244,13 +286,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.62)',
+    backgroundColor: 'rgba(0, 0, 0, 0.44)',
   },
   content: {
     height: '92%',
     paddingHorizontal: SIZES.md,
     paddingTop: SIZES.sm,
-    backgroundColor: THEME.surface.glassStrong,
+    backgroundColor: THEME.background.elevated,
     borderTopLeftRadius: SIZES.radius.lg,
     borderTopRightRadius: SIZES.radius.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -298,11 +340,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.accent.magenta,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   sectionLabel: {
     fontFamily: FONTS.medium,
     fontSize: 13,
     letterSpacing: 0.2,
     color: THEME.text.secondary,
+    marginTop: SIZES.lg,
+    marginBottom: SIZES.sm,
+  },
+  sectionIcon: {
+    marginLeft: SIZES.xs,
     marginTop: SIZES.lg,
     marginBottom: SIZES.sm,
   },

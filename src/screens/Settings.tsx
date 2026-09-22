@@ -1,10 +1,10 @@
-﻿import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import {
   Keyboard,
-  Linking,
   ScrollView,
+  Switch,
   StyleSheet,
   Text,
   TextInput,
@@ -12,8 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, ExternalLink, User } from 'lucide-react-native';
-import Constants from 'expo-constants';
+import { ChevronLeft, ChevronRight, ExternalLink, User } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Gender } from '../services/LibraryService';
@@ -26,27 +25,13 @@ const GENDERS: { value: Gender; label: string }[] = [
   { value: 'unspecified', label: 'Prefer not to say' },
 ];
 
-const REPO_URL = 'https://github.com/saishivasanjeethpaikarao-jpg/-Vibe2X';
-const GPL_URL = 'https://www.gnu.org/licenses/gpl-3.0.en.html';
-const NEWPIPE_URL = 'https://github.com/TeamNewPipe/NewPipeExtractor';
-
-/**
- * Settings, profile and the legal notices.
- *
- * VIBE²X is GPL-3.0-or-later because it links the NewPipe Extractor, and that
- * licence expects the terms and the upstream attribution to be discoverable
- * from the app itself rather than only in the repository. This screen is where
- * they live.
- */
+/** Product settings. Detailed attribution lives one tap away in Legal & Credits. */
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { profile, saveProfile, history, playlists, liked } = useLibrary();
+  const { profile, saveProfile, history, playlists, liked, settings, updateSettings } = useLibrary();
 
   const [name, setName] = useState(profile.name);
-
-  const version =
-    Constants.expoConfig?.version ?? Constants.manifest2?.extra?.expoClient?.version ?? '1.0.0';
 
   const handleExport = async () => {
     try {
@@ -64,10 +49,6 @@ export default function SettingsScreen() {
     if (trimmed !== profile.name) saveProfile({ name: trimmed });
     Keyboard.dismiss();
   }, [name, profile.name, saveProfile]);
-
-  const open = useCallback((url: string) => {
-    void Linking.openURL(url).catch(() => undefined);
-  }, []);
 
   return (
     <View style={styles.container}>
@@ -148,53 +129,41 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* ---- Playback ---- */}
+        <Text style={styles.sectionLabel}>PLAYBACK</Text>
+        <View style={styles.card}>
+          <View style={[styles.infoRow, styles.smartContinueRow]}>
+            <View style={styles.smartContinueText}>
+              <Text style={styles.rowValue}>Smart Continue</Text>
+              <Text style={styles.infoDescription}>Continue from your local library when playback ends</Text>
+            </View>
+            <Switch
+              value={settings.autoplayRelated}
+              onValueChange={(value) => updateSettings({ autoplayRelated: value })}
+              accessibilityLabel="Smart Continue"
+              accessibilityHint="Only starts after a completed track and an empty queue"
+            />
+          </View>
+        </View>
+
         {/* ---- Data ---- */}
         <Text style={styles.sectionLabel}>DATA</Text>
         <View style={styles.card}>
           <LinkRow label="Export backup" onPress={handleExport} />
         </View>
 
-        {/* ---- About ---- */}
+        <Text style={styles.sectionLabel}>PRIVACY</Text>
+        <View style={styles.card}>
+          <Text style={styles.infoDescription}>
+            Your library, listening history, and settings are stored on this device. No Vibe2X account is required.
+          </Text>
+        </View>
+
         <Text style={styles.sectionLabel}>ABOUT</Text>
         <View style={styles.card}>
-          <Row label="Version" value={`${version}`} />
-          <Divider />
-          <Row label="Made by" value="saishivasanjeethpaikarao-jpg" />
-          <Divider />
-          <LinkRow label="Source code" onPress={() => open(REPO_URL)} />
+          <NavigationRow label="About Vibe2X" onPress={() => navigation.navigate('AboutVibe2X' as never)} />
         </View>
 
-        {/* ---- Legal ---- */}
-        <Text style={styles.sectionLabel}>LICENCE</Text>
-        <View style={styles.card}>
-          <Text style={styles.legalTitle}>VIBE²X</Text>
-          <Text style={styles.legalBody}>
-            Original Copyright © 2026 Sanyam Jain.{'\n\n'}
-            This program is free software: you can redistribute it and/or modify it
-            under the terms of the GNU General Public License as published by the
-            Free Software Foundation, either version 3 of the License, or (at your
-            option) any later version.{'\n\n'}
-            This program is distributed in the hope that it will be useful, but
-            WITHOUT ANY WARRANTY; without even the implied warranty of
-            MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-          </Text>
-          <LinkRow label="Read GPL-3.0" onPress={() => open(GPL_URL)} />
-        </View>
-
-        <Text style={styles.sectionLabel}>THIRD-PARTY</Text>
-        <View style={styles.card}>
-          <Text style={styles.legalTitle}>NewPipe Extractor</Text>
-          <Text style={styles.legalBody}>
-            Copyright © Team NewPipe and contributors, licensed GPL-3.0-or-later.
-            {'\n\n'}
-            VIBE²X uses it, unmodified, to resolve playable audio. No NewPipe source
-            is included in this app, and linking it is why VIBE²X carries the same
-            licence.
-          </Text>
-          <LinkRow label="NewPipeExtractor on GitHub" onPress={() => open(NEWPIPE_URL)} />
-        </View>
-
-        <Text style={styles.footer}>MADE BY SAISHIVASANJEETHPAIKARAO-JPG</Text>
       </ScrollView>
     </View>
   );
@@ -218,6 +187,13 @@ const LinkRow: React.FC<{ label: string; onPress: () => void }> = ({ label, onPr
   <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={onPress}>
     <Text style={styles.rowLink}>{label}</Text>
     <ExternalLink color={COLORS.text.secondary} size={16} />
+  </TouchableOpacity>
+);
+
+const NavigationRow: React.FC<{ label: string; onPress: () => void }> = ({ label, onPress }) => (
+  <TouchableOpacity style={styles.row} activeOpacity={0.7} onPress={onPress} accessibilityRole="button">
+    <Text style={styles.rowLink}>{label}</Text>
+    <ChevronRight color={COLORS.text.secondary} size={19} />
   </TouchableOpacity>
 );
 
@@ -394,12 +370,15 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     marginBottom: SIZES.sm,
   },
-  footer: {
-    fontFamily: FONTS.medium,
-    fontSize: 10,
-    letterSpacing: 3,
+  infoRow: {
+    paddingVertical: SIZES.sm,
+  },
+  smartContinueRow: { flexDirection: 'row', alignItems: 'center' },
+  smartContinueText: { flex: 1, paddingRight: SIZES.md },
+  infoDescription: {
+    fontFamily: FONTS.regular,
+    fontSize: 13,
     color: COLORS.text.secondary,
-    textAlign: 'center',
-    marginTop: SIZES.xxl,
+    marginTop: 4,
   },
 });

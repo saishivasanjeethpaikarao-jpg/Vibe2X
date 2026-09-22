@@ -75,6 +75,17 @@ describe('playlist import transaction preparation', () => {
     expect(resolver.getPlaylist).toHaveBeenCalledTimes(3);
   });
 
+  it('continues past an unavailable first page when a continuation has playable tracks', async () => {
+    const resolver = {
+      getPlaylist: vi.fn()
+        .mockResolvedValueOnce(page([], 'next', 2))
+        .mockResolvedValueOnce(page([track('available')])),
+    };
+    const fetched = await new YouTubePlaylistSource(resolver).fetchPlaylist(parsed, new AbortController().signal);
+    expect(fetched.tracks.map((item) => item.sourceId)).toEqual(['available']);
+    expect(fetched.unavailableCount).toBe(2);
+  });
+
   it('parses YouTube browse continuation actions', () => {
     const fixture = {
       onResponseReceivedActions: [

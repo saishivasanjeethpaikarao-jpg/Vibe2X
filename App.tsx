@@ -9,6 +9,7 @@ import { LibraryProvider, useLibrary } from './src/hooks/useLibrary';
 import { COLORS } from './src/constants/theme';
 import { getPlatformInfo, isNoteNativeAvailable } from './modules/note-native';
 import { LaunchExperience } from './src/components/liquid/LaunchExperience';
+import { SnackbarProvider } from './src/components/common/SnackbarContext';
 
 function AppShell() {
   const { isLoaded } = useLibrary();
@@ -43,7 +44,9 @@ export default function App() {
       <SafeAreaProvider>
         <LibraryProvider>
           <PlayerProvider>
-            <AppShell />
+            <SnackbarProvider>
+              <AppShell />
+            </SnackbarProvider>
           </PlayerProvider>
         </LibraryProvider>
       </SafeAreaProvider>

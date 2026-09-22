@@ -237,8 +237,11 @@ export class YouTubeResolver implements TrackResolver {
       const parsedTracks = sourceItems.map(parseTrackItem);
       const tracks = parsedTracks.filter((t): t is Track => t !== null);
       const unavailableCount = parsedTracks.length - tracks.length;
+      const continuation = findContinuation(response);
 
-      if (!tracks.length && !options.continuation) {
+      // A first page can contain only unavailable items while later pages are
+      // playable. Do not reject it before following the continuation.
+      if (!tracks.length && !continuation && !options.continuation) {
         throw appError('invalid_playlist', `Playlist ${id} returned no tracks`);
       }
 
@@ -260,7 +263,7 @@ export class YouTubeResolver implements TrackResolver {
         // duplicate policy only after every page has loaded successfully.
         tracks,
         unavailableCount,
-        continuation: findContinuation(response),
+        continuation,
       };
 
       if (!options.continuation) metadataCache.set(cacheKey, page, TTL.playlist);

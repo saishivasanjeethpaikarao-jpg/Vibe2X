@@ -8,13 +8,15 @@ import OnboardingScreen from '../screens/Onboarding';
 import ProfileSetupScreen from '../screens/ProfileSetup';
 import PlaylistDetailScreen from '../screens/PlaylistDetail';
 import SettingsScreen from '../screens/Settings';
+import AboutVibe2XScreen from '../screens/AboutVibe2X';
+import LegalCreditsScreen from '../screens/LegalCredits';
 import NowPlayingScreen from '../screens/NowPlaying';
 import QueueScreen from '../screens/QueueScreen';
 import ImportPlaylistScreen from '../screens/ImportPlaylist';
 
 const Stack = createNativeStackNavigator();
 
-const NoteTheme = {
+const VibeTheme = {
   ...DefaultTheme,
   colors: {
     ...DefaultTheme.colors,
@@ -34,7 +36,7 @@ export const RootNavigator = () => {
 
   return (
     <NavigationContainer
-      theme={NoteTheme}
+      theme={VibeTheme}
       linking={{
         prefixes: ['vibe2x://'],
         config: {
@@ -50,6 +52,8 @@ export const RootNavigator = () => {
         <Stack.Screen name="Main" component={TabNavigator} />
         <Stack.Screen name="Playlist" component={PlaylistDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="AboutVibe2X" component={AboutVibe2XScreen} />
+        <Stack.Screen name="LegalCredits" component={LegalCreditsScreen} />
         <Stack.Screen
           name="ImportPlaylist"
           component={ImportPlaylistScreen}
