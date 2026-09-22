@@ -33,7 +33,7 @@ const NEWPIPE_URL = 'https://github.com/TeamNewPipe/NewPipeExtractor';
 /**
  * Settings, profile and the legal notices.
  *
- * VIBEÃ‚Â²X is GPL-3.0-or-later because it links the NewPipe Extractor, and that
+ * VIBE²X is GPL-3.0-or-later because it links the NewPipe Extractor, and that
  * licence expects the terms and the upstream attribution to be discoverable
  * from the app itself rather than only in the repository. This screen is where
  * they live.
@@ -167,9 +167,9 @@ export default function SettingsScreen() {
         {/* ---- Legal ---- */}
         <Text style={styles.sectionLabel}>LICENCE</Text>
         <View style={styles.card}>
-          <Text style={styles.legalTitle}>VIBEÃ‚Â²X (fork of NÃƒËœTE)</Text>
+          <Text style={styles.legalTitle}>VIBE²X (fork of NØTE)</Text>
           <Text style={styles.legalBody}>
-            Original Copyright Ã‚Â© 2026 Sanyam Jain.{'\n\n'}
+            Original Copyright © 2026 Sanyam Jain.{'\n\n'}
             This program is free software: you can redistribute it and/or modify it
             under the terms of the GNU General Public License as published by the
             Free Software Foundation, either version 3 of the License, or (at your
@@ -185,10 +185,10 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <Text style={styles.legalTitle}>NewPipe Extractor</Text>
           <Text style={styles.legalBody}>
-            Copyright Ã‚Â© Team NewPipe and contributors, licensed GPL-3.0-or-later.
+            Copyright © Team NewPipe and contributors, licensed GPL-3.0-or-later.
             {'\n\n'}
-            VIBEÃ‚Â²X uses it, unmodified, to resolve playable audio. No NewPipe source
-            is included in this app, and linking it is why VIBEÃ‚Â²X carries the same
+            VIBE²X uses it, unmodified, to resolve playable audio. No NewPipe source
+            is included in this app, and linking it is why VIBE²X carries the same
             licence.
           </Text>
           <LinkRow label="NewPipeExtractor on GitHub" onPress={() => open(NEWPIPE_URL)} />

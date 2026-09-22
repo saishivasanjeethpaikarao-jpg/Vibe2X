@@ -15,6 +15,11 @@ export type ErrorKind =
   | 'search_failed'
   | 'playback_failed'
   | 'timeout'
+  | 'authorization_required'
+  | 'playlist_forbidden'
+  | 'playlist_conflict'
+  | 'import_cancelled'
+  | 'provider_failed'
   | 'unknown';
 
 export class AppError extends Error {
@@ -47,6 +52,11 @@ const DEFAULT_RETRYABLE: Record<ErrorKind, boolean> = {
   search_failed: true,
   playback_failed: true,
   timeout: true,
+  authorization_required: false,
+  playlist_forbidden: false,
+  playlist_conflict: false,
+  import_cancelled: false,
+  provider_failed: true,
   unknown: true,
 };
 
@@ -61,6 +71,12 @@ const MESSAGES: Record<ErrorKind, string> = {
   search_failed: "Search didn't work. Try again.",
   playback_failed: "Couldn't play this track.",
   timeout: 'That took too long. Try again.',
+  authorization_required: 'Connect Spotify to import this playlist.',
+  playlist_forbidden:
+    'Spotify only exposes items from playlists you own or collaborate on.',
+  playlist_conflict: 'A playlist with this name already exists.',
+  import_cancelled: 'Import cancelled. Nothing was saved.',
+  provider_failed: 'The playlist provider could not complete this import.',
   unknown: 'Something went wrong.',
 };
 

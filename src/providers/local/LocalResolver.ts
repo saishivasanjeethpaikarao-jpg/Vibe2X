@@ -1,5 +1,12 @@
-﻿import * as MediaLibrary from 'expo-media-library';
-import { ProviderId, ResolvedStream, Track, SearchResults, trackKey, emptySearchResults } from '../../core/types';
+import * as MediaLibrary from 'expo-media-library/legacy';
+import { appError } from '../../core/errors';
+import {
+  ResolvedStream,
+  Track,
+  SearchResults,
+  trackKey,
+  emptySearchResults,
+} from '../../core/types';
 import { TrackResolver, PlaylistPage } from '../TrackResolver';
 
 export const localResolver: TrackResolver = {
@@ -11,20 +18,37 @@ export const localResolver: TrackResolver = {
   },
 
   async resolve(track: Track): Promise<ResolvedStream> {
-    return { url: track.audioUrl || '', mimeType: 'audio/mpeg', expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 365, resolvedBy: 'local' };
+    let url = track.audioUrl;
+
+    // Library entries created by older builds may have had their local URI
+    // stripped alongside expiring network stream URLs. Recover it from the
+    // stable MediaLibrary asset id rather than handing expo-audio an empty URI.
+    if (!url) {
+      const asset = await MediaLibrary.getAssetInfoAsync(track.sourceId);
+      url = asset.localUri ?? asset.uri;
+    }
+
+    if (!url) throw appError('track_unavailable', 'Local audio file is unavailable');
+
+    return {
+      url,
+      mimeType: 'audio/mpeg',
+      expiresAt: Date.now() + 1000 * 60 * 60 * 24 * 365,
+      resolvedBy: 'local',
+    };
   },
 
-  async getMetadata(sourceId: string): Promise<Track> {
+  async getMetadata(_sourceId: string): Promise<Track> {
     throw new Error('Not implemented');
   },
 
-  async getPlaylist(browseId: string): Promise<PlaylistPage> {
+  async getPlaylist(_browseId: string): Promise<PlaylistPage> {
     throw new Error('Not implemented');
   },
 };
 
 export async function fetchLocalTracks(): Promise<Track[]> {
-  const { status } = await MediaLibrary.requestPermissionsAsync();
+  const { status } = await MediaLibrary.requestPermissionsAsync(false, ['audio']);
   if (status !== 'granted') return [];
 
   const media = await MediaLibrary.getAssetsAsync({
@@ -32,16 +56,14 @@ export async function fetchLocalTracks(): Promise<Track[]> {
     first: 1000,
   });
 
-  return media.assets.map(asset => ({
+  return media.assets.map((asset) => ({
     id: trackKey('local', asset.id),
     provider: 'local',
     sourceId: asset.id,
-    title: asset.filename.replace(/\.[^/.]+$/, ""), // remove extension
-    artist: { id: 'local-artist', name: 'Local Music', provider: 'local' as ProviderId, browseId: 'local-artist', imageUrl: '' },
-    albumImageUrl: 'local_music_icon', 
+    title: asset.filename.replace(/\.[^/.]+$/, ''),
+    artist: { id: 'local-artist', name: 'Local Music', imageUrl: '' },
+    albumImageUrl: '',
     duration: Math.floor(asset.duration),
     audioUrl: asset.uri,
-    createdAt: asset.creationTime,
-    updatedAt: asset.modificationTime,
   }));
 }

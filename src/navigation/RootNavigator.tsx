@@ -10,6 +10,7 @@ import PlaylistDetailScreen from '../screens/PlaylistDetail';
 import SettingsScreen from '../screens/Settings';
 import NowPlayingScreen from '../screens/NowPlaying';
 import QueueScreen from '../screens/QueueScreen';
+import ImportPlaylistScreen from '../screens/ImportPlaylist';
 
 const Stack = createNativeStackNavigator();
 
@@ -32,13 +33,28 @@ export const RootNavigator = () => {
   const initialRoute = profile.completed ? 'Main' : 'Onboarding';
 
   return (
-    <NavigationContainer theme={NoteTheme}>
+    <NavigationContainer
+      theme={NoteTheme}
+      linking={{
+        prefixes: ['vibe2x://'],
+        config: {
+          screens: {
+            ImportPlaylist: 'import',
+          },
+        },
+      }}
+    >
       <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="Main" component={TabNavigator} />
         <Stack.Screen name="Playlist" component={PlaylistDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen
+          name="ImportPlaylist"
+          component={ImportPlaylistScreen}
+          options={{ presentation: 'modal' }}
+        />
         <Stack.Screen 
           name="NowPlaying" 
           component={NowPlayingScreen} 

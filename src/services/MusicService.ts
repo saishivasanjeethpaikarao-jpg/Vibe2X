@@ -134,6 +134,7 @@ class MusicServiceImpl {
 
   /** Whether any configured source could play this track at all. */
   canPlay(track: Track): boolean {
+    if (track.provider === 'local') return Boolean(track.audioUrl || track.sourceId);
     return streamResolver.canResolve(track);
   }
 

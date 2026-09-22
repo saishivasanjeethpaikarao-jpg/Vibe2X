@@ -5,6 +5,7 @@
   removeKey,
   STORAGE_KEYS,
 } from '../core/storage';
+import { appErrorWithMessage } from '../core/errors';
 import { Playlist, Track } from '../core/types';
 import { getListenHistory, logPlay, clearListenHistory, batchLogPlays, HistoryEntry } from '../core/lie';
 
@@ -214,28 +215,45 @@ class LibraryServiceImpl {
     return playlist;
   }
 
-  /** Import replaces an existing import of the same source rather than duplicating. */
-  importPlaylist(
+  /**
+   * Commit a fully prepared import in one write.
+   *
+   * The caller must resolve name/source collisions explicitly. This method
+   * never merges or overwrites an existing local playlist.
+   */
+  createImportedPlaylist(
     name: string,
     tracks: Track[],
     source: NonNullable<Playlist['source']>,
-    meta: { description?: string; creator?: string; coverImageUrl?: string } = {}
+    meta: { description?: string; creator?: string; coverImageUrl?: string } = {},
+    options: { allowSourceCopy?: boolean } = {}
   ): Playlist {
-    const existing = this.playlists.find(
-      (p) => p.source?.provider === source.provider && p.source?.browseId === source.browseId
-    );
-
-    if (existing) {
-      this.updatePlaylist(existing.id, {
-        name,
-        tracks: tracks.map(stripStream),
-        description: meta.description ?? existing.description,
-        coverImageUrl: meta.coverImageUrl || existing.coverImageUrl,
-      });
-      return this.getPlaylist(existing.id)!;
+    const cleanName = name.trim();
+    if (!cleanName) {
+      throw appErrorWithMessage('playlist_conflict', 'Choose a name for the imported playlist.');
     }
 
-    return this.createPlaylist(name, { ...meta, tracks, source });
+    const nameCollision = this.playlists.some(
+      (playlist) => playlist.name.trim().toLocaleLowerCase() === cleanName.toLocaleLowerCase()
+    );
+    if (nameCollision) {
+      throw appErrorWithMessage(
+        'playlist_conflict',
+        'A playlist with this name already exists. Choose another name.'
+      );
+    }
+
+    const sourceCollision = this.playlists.find(
+      (p) => p.source?.provider === source.provider && p.source?.browseId === source.browseId
+    );
+    if (sourceCollision && !options.allowSourceCopy) {
+      throw appErrorWithMessage(
+        'playlist_conflict',
+        'This source playlist is already in your library. Create a named copy instead.'
+      );
+    }
+
+    return this.createPlaylist(cleanName, { ...meta, tracks, source });
   }
 
   updatePlaylist(id: string, patch: Partial<Omit<Playlist, 'id' | 'createdAt'>>): void {
@@ -414,6 +432,9 @@ class LibraryServiceImpl {
  * restoring a library full of dead links.
  */
 function stripStream(track: Track): Track {
+  // MediaLibrary URIs identify on-device files and are required to replay a
+  // saved local track. Only provider stream URLs are short-lived credentials.
+  if (track.provider === 'local') return track;
   if (!track.audioUrl) return track;
   const { audioUrl, ...rest } = track;
   return rest;

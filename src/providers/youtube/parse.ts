@@ -254,7 +254,11 @@ export function collectShelfItems(node: Any): { shelfTitle: string; items: Any[]
   const visit = (n: Any) => {
     if (!n || typeof n !== 'object') return;
 
-    const shelf = n.musicShelfRenderer ?? n.musicPlaylistShelfRenderer;
+    const shelf =
+      n.musicShelfRenderer ??
+      n.musicPlaylistShelfRenderer ??
+      n.musicShelfContinuation ??
+      n.musicPlaylistShelfContinuation;
     if (shelf) {
       const items = (shelf.contents ?? [])
         .map((c: Any) => c?.musicResponsiveListItemRenderer)
@@ -277,6 +281,16 @@ export function collectShelfItems(node: Any): { shelfTitle: string; items: Any[]
           items,
         });
       }
+    }
+
+    const continuationItems =
+      n.appendContinuationItemsAction?.continuationItems ??
+      n.reloadContinuationItemsCommand?.continuationItems;
+    if (Array.isArray(continuationItems)) {
+      const items = continuationItems
+        .map((c: Any) => c?.musicResponsiveListItemRenderer)
+        .filter(Boolean);
+      if (items.length) shelves.push({ shelfTitle: '', items });
     }
 
     for (const value of Object.values(n)) {

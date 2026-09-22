@@ -68,3 +68,18 @@ JavaScript dependencies declared in `package.json` are used unmodified under
 their own licenses, predominantly **MIT**. Their terms apply independently.
 Run `npm ls --all` for the resolved dependency tree, or consult each package's
 own `LICENSE` file under `node_modules/`.
+
+---
+
+## Spotify attribution asset
+
+`assets/spotify-full-logo-white.png` is the unmodified white RGB full-logo asset
+from Spotify's official developer design kit:
+
+https://developer.spotify.com/documentation/design
+
+Spotify and the Spotify logo are trademarks of Spotify AB. The asset is used
+only to attribute Spotify-supplied playlist metadata and links back to the
+applicable Spotify playlist. Its inclusion does not imply affiliation or
+endorsement. Spotify audio, album artwork, client secrets, and OAuth tokens are
+not included in this repository.

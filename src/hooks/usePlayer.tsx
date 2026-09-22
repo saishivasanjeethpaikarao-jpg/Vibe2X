@@ -21,7 +21,7 @@ import { MusicService } from '../services/MusicService';
 import { getSuppressedTrackIds, getRecentTrackIds } from '../core/lie';
 
 type PlayerContextType = {
-  // --- the original mock API, unchanged so existing screens keep working ---
+  // --- core player state used by every screen ---
   currentTrack: Track | null;
   isPlaying: boolean;
   playTrack: (track: Track, context?: { tracks?: Track[]; label?: string }) => void;
@@ -280,7 +280,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         getRecentTrackIds(12), // 12 hour repetition penalty window
       ]);
 
-      // Context changed while we were fetching â€” discard these suggestions.
+      // Context changed while we were fetching — discard these suggestions.
       if (loadId.current !== id) return;
 
       // Filter out suppressed tracks and already queued tracks

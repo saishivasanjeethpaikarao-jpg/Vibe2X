@@ -11,8 +11,9 @@ const fs = require('fs');
  *
  * Credentials are read from credentials/keystore.json, which is gitignored
  * along with the keystore itself -- nothing secret is committed. If that file
- * is absent the plugin leaves the project untouched, so a fresh clone still
- * builds (debug-signed) without any setup.
+ * is absent the plugin removes the Expo template's debug signing from the
+ * release build type. Debug builds still work without setup, while release
+ * output remains unsigned until the maintainer supplies credentials.
  *
  * This is a config plugin because android/ is generated and
  * `npx expo prebuild --clean` would discard a hand edit.
@@ -115,13 +116,37 @@ function withSigningConfig(config, credentials) {
   });
 }
 
+/** Never let a release artifact silently use Android's public debug key. */
+function withoutDebugReleaseSigning(config) {
+  return withAppBuildGradle(config, (cfg) => {
+    const releaseAnchor = [
+      '            // Caution! In production, you need to generate your own keystore file.',
+      '            // see https://reactnative.dev/docs/signed-apk-android.',
+      '            signingConfig signingConfigs.debug',
+    ].join('\n');
+
+    if (!cfg.modResults.contents.includes(releaseAnchor)) {
+      throw new Error('withReleaseSigning: could not find the release buildType');
+    }
+
+    cfg.modResults.contents = cfg.modResults.contents.replace(
+      releaseAnchor,
+      [
+        '            // Release signing is intentionally unconfigured.',
+        '            // Add credentials/keystore.json to sign a release build.',
+      ].join('\n')
+    );
+    return cfg;
+  });
+}
+
 module.exports = function withReleaseSigning(config) {
   // Resolved lazily: config plugins run from the project root.
   const credentials = readCredentials(process.cwd());
 
-  // No credentials checked out -> leave the debug signing in place rather than
-  // failing the build for anyone who just cloned the repo.
-  if (!credentials) return config;
+  // No credentials checked out -> keep debug builds usable, but never sign a
+  // release artifact with the well-known Android debug key.
+  if (!credentials) return withoutDebugReleaseSigning(config);
 
   let next = withKeystoreCopied(config, credentials);
   next = withSigningConfig(next, credentials);

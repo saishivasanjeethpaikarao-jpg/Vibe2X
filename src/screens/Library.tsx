@@ -6,12 +6,11 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  ActivityIndicator,
   Image,
   Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Plus, X, Trash2, Pin } from 'lucide-react-native';
+import { Plus, X, Trash2, Pin, Download } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Pill } from '../components/common/Pill';
 import { GlassCard } from '../components/common/GlassCard';
@@ -27,8 +26,10 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 type LibraryStackParams = {
   Playlist: { playlistId: string };
+  ImportPlaylist: { url?: string } | undefined;
   NowPlaying: undefined;
 };
+const SPOTIFY_LOGO = require('../../assets/spotify-full-logo-white.png');
 
 const FILTERS = ['Playlists', 'Artists', 'Albums', 'Local Files'];
 
@@ -42,10 +43,6 @@ export default function LibraryScreen() {
     likedPlaylist,
     liked,
     recentlyPlayed,
-    importPlaylist,
-    importing,
-    importError,
-    clearImportError,
     deletePlaylist,
     togglePinPlaylist,
     touchPlaylist,
@@ -53,7 +50,6 @@ export default function LibraryScreen() {
   } = useLibrary();
 
   const [showImport, setShowImport] = useState(false);
-  const [importUrl, setImportUrl] = useState('');
   const [newPlaylistName, setNewPlaylistName] = useState('');
   const [localTracks, setLocalTracks] = useState<Track[]>([]);
   const [isScanning, setIsScanning] = useState(false);
@@ -143,19 +139,6 @@ export default function LibraryScreen() {
     navigation.navigate('Playlist', { playlistId: playlist.id });
   };
 
-  const onImport = async () => {
-    const url = importUrl.trim();
-    if (!url) return;
-
-    try {
-      await importPlaylist(url);
-      setImportUrl('');
-      setShowImport(false);
-    } catch {
-      // importError is rendered inline below.
-    }
-  };
-
   return (
     <View style={styles.container}>
       <ScrollView
@@ -171,7 +154,6 @@ export default function LibraryScreen() {
             style={styles.addButton}
             onPress={() => {
               setShowImport((v) => !v);
-              clearImportError();
             }}
           >
             {showImport ? (
@@ -210,32 +192,19 @@ export default function LibraryScreen() {
 
             <View style={styles.panelDivider} />
 
-            <Text style={styles.importTitle}>Import a public playlist</Text>
-            <View style={styles.importRow}>
-              <TextInput
-                style={styles.importInput}
-                placeholder="Paste a playlist or album link"
-                placeholderTextColor={COLORS.text.muted}
-                value={importUrl}
-                onChangeText={setImportUrl}
-                onSubmitEditing={onImport}
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="done"
-              />
-              <TouchableOpacity
-                style={styles.importButton}
-                onPress={onImport}
-                disabled={importing}
-              >
-                {importing ? (
-                  <ActivityIndicator size="small" color={COLORS.background} />
-                ) : (
-                  <Text style={styles.importButtonText}>Add</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-            {importError && <Text style={styles.importError}>{importError}</Text>}
+            <TouchableOpacity
+              style={styles.importAction}
+              onPress={() => {
+                setShowImport(false);
+                navigation.navigate('ImportPlaylist');
+              }}
+            >
+              <Download color={COLORS.text.primary} size={20} />
+              <View style={styles.importActionCopy}>
+                <Text style={styles.importActionTitle}>Import Playlist</Text>
+                <Text style={styles.importActionSubtitle}>YouTube, YouTube Music, or Spotify</Text>
+              </View>
+            </TouchableOpacity>
           </GlassCard>
         )}
 
@@ -271,12 +240,19 @@ export default function LibraryScreen() {
                     <View style={[styles.playlistImage, styles.likedSongsGradient]} />
                   )}
                   <View style={styles.playlistInfo}>
-                    <Text style={styles.playlistTitle}>{playlist.name}</Text>
-                    <Text style={styles.playlistSubtitle}>
-                      {playlist.id === 'liked'
-                        ? `${playlist.tracks.length} songs`
-                        : `Playlist â€¢ ${playlist.creator} â€¢ ${playlist.tracks.length}`}
-                    </Text>
+                    <Text style={styles.playlistTitle} numberOfLines={1}>{playlist.name}</Text>
+                    {playlist.source?.provider === 'spotify' ? (
+                      <View style={styles.spotifyAttribution}>
+                        <Text style={styles.playlistSubtitle}>Playlist • {playlist.tracks.length}</Text>
+                        <Image source={SPOTIFY_LOGO} style={styles.spotifyLogo} resizeMode="contain" />
+                      </View>
+                    ) : (
+                      <Text style={styles.playlistSubtitle}>
+                        {playlist.id === 'liked'
+                          ? `${playlist.tracks.length} songs`
+                          : `Playlist • ${playlist.creator} • ${playlist.tracks.length}`}
+                      </Text>
+                    )}
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                     {playlist.id !== 'liked' && (
@@ -308,7 +284,7 @@ export default function LibraryScreen() {
                   <View style={styles.playlistInfo}>
                     <Text style={styles.playlistTitle}>{artist.name}</Text>
                     <Text style={styles.playlistSubtitle}>
-                      Artist â€¢ {artist.count} {artist.count === 1 ? 'song' : 'songs'}
+                      Artist • {artist.count} {artist.count === 1 ? 'song' : 'songs'}
                     </Text>
                   </View>
                 </View>
@@ -325,7 +301,7 @@ export default function LibraryScreen() {
                   <View style={styles.playlistInfo}>
                     <Text style={styles.playlistTitle}>{album.name}</Text>
                     <Text style={styles.playlistSubtitle}>
-                      Album â€¢ {album.artist}
+                      Album • {album.artist}
                     </Text>
                   </View>
                 </View>
@@ -499,16 +475,38 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.glassBorder,
     marginVertical: SIZES.md,
   },
+  spotifyAttribution: {
+    alignItems: 'flex-start',
+    gap: 2,
+  },
+  spotifyLogo: {
+    width: 70,
+    height: 20,
+  },
+  importAction: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SIZES.md,
+  },
+  importActionCopy: {
+    flex: 1,
+  },
+  importActionTitle: {
+    fontFamily: FONTS.medium,
+    fontSize: 15,
+    color: COLORS.text.primary,
+  },
+  importActionSubtitle: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    marginTop: 2,
+  },
   importButtonText: {
     fontFamily: FONTS.medium,
     fontSize: 14,
     color: COLORS.background,
-  },
-  importError: {
-    fontFamily: FONTS.regular,
-    fontSize: 12,
-    color: COLORS.accent.red,
-    marginTop: SIZES.sm,
   },
 });
 

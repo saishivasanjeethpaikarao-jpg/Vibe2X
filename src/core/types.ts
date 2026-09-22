@@ -7,6 +7,8 @@
 
 export type ProviderId = 'youtube' | 'local';
 
+export type PlaylistImportProvider = 'youtube' | 'spotify';
+
 export type Artist = {
   id: string;
   name: string;
@@ -75,8 +77,13 @@ export type Playlist = {
   creator: string;
   coverImageUrl: string;
   tracks: Track[];
-  /** Set when this playlist was imported from a provider. */
-  source?: { provider: ProviderId; browseId: string };
+  /** Import provenance only; playback continues to use each stored Track's provider. */
+  source?: {
+    provider: PlaylistImportProvider;
+    browseId: string;
+    url?: string;
+    importedAt?: number;
+  };
   createdAt: number;
   updatedAt: number;
   /** Whether the playlist is pinned to the top of the user's library. */

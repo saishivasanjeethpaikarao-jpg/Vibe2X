@@ -18,6 +18,8 @@ export type SearchOptions = {
 export type PlaylistPage = {
   playlist: RemotePlaylist;
   tracks: Track[];
+  /** Source rows skipped because they were deleted, private, or malformed. */
+  unavailableCount?: number;
   /** Token for the next page, when the playlist is longer than one page. */
   continuation?: string;
 };

@@ -228,13 +228,15 @@ export class YouTubeResolver implements TrackResolver {
 
     try {
       const response = options.continuation
-        ? await innertube.searchContinuation(options.continuation, options.signal)
+        ? await innertube.browseContinuation(options.continuation, options.signal)
         : await innertube.browse(id, options.signal);
 
-      const tracks = collectShelfItems(response?.contents ?? response)
-        .flatMap((s) => s.items)
-        .map(parseTrackItem)
-        .filter((t): t is Track => t !== null);
+      const sourceItems = collectShelfItems(response?.contents ?? response).flatMap(
+        (s) => s.items
+      );
+      const parsedTracks = sourceItems.map(parseTrackItem);
+      const tracks = parsedTracks.filter((t): t is Track => t !== null);
+      const unavailableCount = parsedTracks.length - tracks.length;
 
       if (!tracks.length && !options.continuation) {
         throw appError('invalid_playlist', `Playlist ${id} returned no tracks`);
@@ -254,7 +256,10 @@ export class YouTubeResolver implements TrackResolver {
 
       const page: PlaylistPage = {
         playlist,
-        tracks: dedupeBy(tracks, (t) => t.id),
+        // Keep source order here. Importing applies the local playlist model's
+        // duplicate policy only after every page has loaded successfully.
+        tracks,
+        unavailableCount,
         continuation: findContinuation(response),
       };
 

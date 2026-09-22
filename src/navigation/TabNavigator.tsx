@@ -4,7 +4,6 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Home, Search, Library, Clock } from 'lucide-react-native';
 import { COLORS } from '../constants/theme';
 
-// Placeholder screens
 import HomeScreen from '../screens/Home';
 import SearchScreen from '../screens/Search';
 import LibraryScreen from '../screens/Library';

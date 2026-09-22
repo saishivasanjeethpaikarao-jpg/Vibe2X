@@ -4,6 +4,10 @@
     "slug": "vibe2x",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": [
+      "vibe2x",
+      "vibe2x-spotify"
+    ],
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
@@ -50,7 +54,17 @@
       "./plugins/withAndroidAbis",
       "./plugins/withReleaseSigning",
       "expo-sqlite",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-media-library",
+        {
+          "granularPermissions": [
+            "audio"
+          ]
+        }
+      ],
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "backgroundColor": "#050707"
   }

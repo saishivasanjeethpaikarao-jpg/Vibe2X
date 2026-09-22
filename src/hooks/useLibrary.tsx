@@ -7,7 +7,6 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import { messageFor } from '../core/errors';
 import { Playlist, Track } from '../core/types';
 import { endpointSource } from '../providers/stream/StreamResolver';
 import {
@@ -16,7 +15,6 @@ import {
   LibraryService,
   UserProfile,
 } from '../services/LibraryService';
-import { MusicService } from '../services/MusicService';
 
 type LibraryContextType = {
   liked: Track[];
@@ -40,11 +38,13 @@ type LibraryContextType = {
   addToPlaylist: (playlistId: string, tracks: Track | Track[]) => void;
   removeFromPlaylist: (playlistId: string, trackId: string) => void;
 
-  /** Import a public playlist/album by URL or id. Resolves to the new playlist. */
-  importPlaylist: (url: string) => Promise<Playlist>;
-  importing: boolean;
-  importError: string | null;
-  clearImportError: () => void;
+  createImportedPlaylist: (
+    name: string,
+    tracks: Track[],
+    source: NonNullable<Playlist['source']>,
+    meta?: { description?: string; creator?: string; coverImageUrl?: string },
+    options?: { allowSourceCopy?: boolean }
+  ) => Playlist;
 
   updateSettings: (patch: Partial<AppSettings>) => void;
 
@@ -65,9 +65,6 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [settings, setSettings] = useState<AppSettings>(LibraryService.getSettings());
   const [isLoaded, setIsLoaded] = useState(false);
-
-  const [importing, setImporting] = useState(false);
-  const [importError, setImportError] = useState<string | null>(null);
 
   const sync = useCallback(() => {
     setLiked(LibraryService.getLiked());
@@ -195,44 +192,17 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
     [sync]
   );
 
-  const importPlaylist = useCallback(
-    async (url: string): Promise<Playlist> => {
-      setImporting(true);
-      setImportError(null);
-
-      try {
-        const result = await MusicService.importFromUrl(url);
-
-        if ('track' in result) {
-          // A single track link becomes a one-song playlist rather than an error.
-          const playlist = LibraryService.createPlaylist(result.track.title, {
-            tracks: [result.track],
-            coverImageUrl: result.track.albumImageUrl,
-          });
-          sync();
-          return playlist;
-        }
-
-        const { playlist: remote, tracks } = result.page;
-        const saved = LibraryService.importPlaylist(
-          remote.name,
-          tracks,
-          { provider: remote.provider, browseId: remote.browseId },
-          {
-            description: remote.description,
-            creator: remote.creator,
-            coverImageUrl: remote.coverImageUrl,
-          }
-        );
-        sync();
-        return saved;
-      } catch (e) {
-        const message = messageFor(e);
-        setImportError(message);
-        throw e;
-      } finally {
-        setImporting(false);
-      }
+  const createImportedPlaylist = useCallback(
+    (
+      name: string,
+      tracks: Track[],
+      source: NonNullable<Playlist['source']>,
+      meta: { description?: string; creator?: string; coverImageUrl?: string } = {},
+      options: { allowSourceCopy?: boolean } = {}
+    ) => {
+      const playlist = LibraryService.createImportedPlaylist(name, tracks, source, meta, options);
+      sync();
+      return playlist;
     },
     [sync]
   );
@@ -283,10 +253,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       renamePlaylist,
       addToPlaylist,
       removeFromPlaylist,
-      importPlaylist,
-      importing,
-      importError,
-      clearImportError: () => setImportError(null),
+      createImportedPlaylist,
       updateSettings,
 
       profile: settings.profile,
@@ -310,9 +277,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       renamePlaylist,
       addToPlaylist,
       removeFromPlaylist,
-      importPlaylist,
-      importing,
-      importError,
+      createImportedPlaylist,
       updateSettings,
       saveProfile,
       likedPlaylist,

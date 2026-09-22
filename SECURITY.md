@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Currently, there are no official releases for Vibe2X. The \main\ branch is under active development.
+Currently, there are no official releases for Vibe2X. The `main` branch is under active development.
 
 ## Reporting a Vulnerability
 

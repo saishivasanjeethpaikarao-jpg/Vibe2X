@@ -86,6 +86,21 @@ export const innertube = {
     );
   },
 
+  /** Continuation token from a playlist/album browse response. */
+  browseContinuation(continuation: string, signal?: AbortSignal) {
+    return fetchJson<any>(
+      `${BASE}/browse?prettyPrint=false&continuation=${encodeURIComponent(continuation)}`,
+      {
+        method: 'POST',
+        headers: HEADERS,
+        body: { context: { client: CLIENT } },
+        timeoutMs: 12_000,
+        retries: 1,
+        signal,
+      }
+    );
+  },
+
   browse(browseId: string, signal?: AbortSignal) {
     return call<any>('browse', { browseId }, signal, 'invalid_playlist');
   },

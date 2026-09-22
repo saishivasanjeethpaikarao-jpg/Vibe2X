@@ -1,14 +1,16 @@
 ﻿import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Image,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Play, Shuffle, ListPlus } from 'lucide-react-native';
+import { ChevronLeft, Play, Shuffle, ListPlus, ExternalLink } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { TrackRow } from '../components/lists/TrackRow';
@@ -21,6 +23,7 @@ import { useLibrary } from '../hooks/useLibrary';
 
 type PlaylistRouteParams = { playlistId: string };
 type PlaylistRoute = RouteProp<{ Playlist: PlaylistRouteParams }, 'Playlist'>;
+const SPOTIFY_LOGO = require('../../assets/spotify-full-logo-white.png');
 
 /**
  * A playlist on its own page.
@@ -57,6 +60,21 @@ export default function PlaylistDetailScreen() {
   );
 
   const tracks = playlist?.tracks ?? [];
+
+  const openSourceUrl = async () => {
+    const sourceUrl = playlist?.source?.url;
+    if (!sourceUrl) return;
+    try {
+      const canOpen = await Linking.canOpenURL(sourceUrl);
+      if (!canOpen) throw new Error('Unsupported external URL');
+      await Linking.openURL(sourceUrl);
+    } catch {
+      Alert.alert(
+        'Couldn’t open source',
+        `The original ${playlist.source?.provider === 'spotify' ? 'Spotify' : 'YouTube'} playlist could not be opened.`
+      );
+    }
+  };
 
   const playFromStart = useCallback(() => {
     if (!tracks.length || !playlist) return;
@@ -122,9 +140,25 @@ export default function PlaylistDetailScreen() {
 
       <Text style={styles.title} numberOfLines={2}>{playlist.name}</Text>
       <Text style={styles.meta} numberOfLines={1}>
-        {playlist.creator ? `${playlist.creator} â€¢ ` : ''}
+        {playlist.creator ? `${playlist.creator} • ` : ''}
         {tracks.length} {tracks.length === 1 ? 'track' : 'tracks'}
       </Text>
+
+      {playlist.source?.url && (
+        <TouchableOpacity
+          style={styles.sourceLink}
+          onPress={openSourceUrl}
+        >
+          {playlist.source.provider === 'spotify' ? (
+            <Image source={SPOTIFY_LOGO} style={styles.spotifyLogo} resizeMode="contain" />
+          ) : (
+            <ExternalLink color={COLORS.text.secondary} size={15} />
+          )}
+          <Text style={styles.sourceLinkText}>
+            {playlist.source.provider === 'spotify' ? 'OPEN SPOTIFY' : 'Imported from YouTube'}
+          </Text>
+        </TouchableOpacity>
+      )}
 
       <View style={styles.actions}>
         <TouchableOpacity
@@ -255,7 +289,24 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.regular,
     fontSize: 14,
     color: COLORS.text.secondary,
-    marginBottom: SIZES.lg,
+    marginBottom: SIZES.md,
+  },
+  sourceLink: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SIZES.sm,
+    alignSelf: 'flex-start',
+    marginBottom: SIZES.md,
+  },
+  sourceLinkText: {
+    fontFamily: FONTS.medium,
+    fontSize: 13,
+    color: COLORS.text.secondary,
+  },
+  spotifyLogo: {
+    width: 88,
+    height: 24,
   },
   actions: {
     flexDirection: 'row',

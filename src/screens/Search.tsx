@@ -56,7 +56,7 @@ export default function SearchScreen() {
       Keyboard.dismiss();
       playTrack(track, {
         tracks: results.tracks,
-        label: `Search â€¢ ${results.query}`,
+        label: `Search • ${results.query}`,
       });
     },
     [playTrack, results.tracks, results.query]
@@ -107,7 +107,7 @@ export default function SearchScreen() {
   );
 
   // Synthetic Track objects for non-track results. Memoized because a new
-  // object literal per render would defeat TrackRowâ€™s memoization.
+  // object literal per render would defeat TrackRow’s memoization.
   const artistRows = useMemo(
     () =>
       results.artists.map((artist) => ({
@@ -129,7 +129,7 @@ export default function SearchScreen() {
         title: album.title,
         artist: {
           id: album.id,
-          name: album.year ? `${album.artist} â€¢ ${album.year}` : album.artist,
+          name: album.year ? `${album.artist} • ${album.year}` : album.artist,
         },
         albumImageUrl: album.coverImageUrl,
         duration: 0,
@@ -216,7 +216,7 @@ export default function SearchScreen() {
 
         {isBrowsing ? (
           <>
-            <Text style={styles.sectionTitle}>Browse VIBEÂ²X</Text>
+            <Text style={styles.sectionTitle}>Browse VIBE²X</Text>
 
             <View style={styles.categoriesGrid}>
               {BROWSE_CATEGORIES.map((category) => (
