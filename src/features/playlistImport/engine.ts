@@ -45,6 +45,15 @@ export class PlaylistImportEngine {
   ): Promise<SpotifyTrackMatch[]> {
     if (playlist.source !== 'spotify') return [];
 
+    return this.matchMetadata(playlist, signal, onProgress);
+  }
+
+  /** Match metadata from a provider or a local export file through the same review system. */
+  async matchMetadata(
+    playlist: SourcePlaylist,
+    signal: AbortSignal,
+    onProgress?: (progress: ImportProgress) => void
+  ): Promise<SpotifyTrackMatch[]> {
     const matches: SpotifyTrackMatch[] = [];
     const cache = new Map<string, Omit<SpotifyTrackMatch, 'source'>>();
 
@@ -70,7 +79,16 @@ export class PlaylistImportEngine {
             `Matching stopped at “${source.title}” because search is unavailable. Nothing was saved.`
           );
         }
-        const match = matchSpotifyTrack(source, candidates);
+        let match = matchSpotifyTrack(source, candidates);
+        if (source.alternate) {
+          const alternate = matchSpotifyTrack(
+            { ...source, title: source.alternate.title, artists: source.alternate.artists },
+            candidates
+          );
+          if ((alternate.alternatives[0]?.score ?? 0) > (match.alternatives[0]?.score ?? 0) + 0.01) {
+            match = alternate;
+          }
+        }
         const reusable = {
           confidence: match.confidence,
           alternatives: match.alternatives,
@@ -90,12 +108,13 @@ export class PlaylistImportEngine {
 
   collisionFor(playlist: SourcePlaylist, existing: Playlist[]): ImportCollision {
     const normalizedName = playlist.name.trim().toLocaleLowerCase();
-    const sameSource =
-      existing.find(
-        (item) =>
-          item.source?.provider === playlist.source &&
-          item.source?.browseId === playlist.sourcePlaylistId
-      ) ?? null;
+    const sameSource = playlist.source === 'file'
+      ? null
+      : existing.find(
+          (item) =>
+            item.source?.provider === playlist.source &&
+            item.source?.browseId === playlist.sourcePlaylistId
+        ) ?? null;
     const sameName =
       existing.find((item) => item.name.trim().toLocaleLowerCase() === normalizedName) ?? null;
 
@@ -125,6 +144,10 @@ export class PlaylistImportEngine {
   }
 
   prepareSpotify(playlist: SourcePlaylist, matches: SpotifyTrackMatch[]): PreparedImport {
+    return this.prepareMatched(playlist, matches);
+  }
+
+  prepareMatched(playlist: SourcePlaylist, matches: SpotifyTrackMatch[]): PreparedImport {
     const seen = new Set<string>();
     const tracks: Track[] = [];
     let duplicateCount = playlist.duplicateCount;

@@ -17,10 +17,12 @@ export type SourceTrack = {
   duration: number;
   sourceUrl?: string;
   playableTrack?: Track;
+  /** TXT exports vary between Artist - Title and Title - Artist. */
+  alternate?: { title: string; artists: string[] };
 };
 
 export type SourcePlaylist = {
-  source: PlaylistImportProvider;
+  source: PlaylistImportProvider | 'file';
   sourcePlaylistId: string;
   sourcePlaylistUrl: string;
   name: string;

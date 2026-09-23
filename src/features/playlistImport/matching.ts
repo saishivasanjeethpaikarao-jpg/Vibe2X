@@ -34,7 +34,7 @@ export function normalizeText(value: string): string {
     .replace(HARMLESS, ' ')
     .toLowerCase()
     .replace(/&/g, ' and ')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
 }
@@ -78,6 +78,8 @@ export function scoreTrackMatch(source: SourceTrack, candidate: Track): MatchCan
     .split(/\s*(?:,|&|\band\b|\bfeaturing\b|\bfeat\.?\b|\bft\.?\b)\s*/i)
     .map(normalizeText)
     .filter(Boolean);
+  const combinedCandidateArtist = normalizeText(candidate.artist.name);
+  if (combinedCandidateArtist) candidateArtists.push(combinedCandidateArtist);
 
   const primaryArtist = sourceArtists[0] ?? '';
   const primaryScore = Math.max(
@@ -145,6 +147,7 @@ export function matchSpotifyTrack(source: SourceTrack, candidates: Track[]): Spo
     confidence,
     alternatives,
     selectedTrack: confidence === 'HIGH' ? best.track : null,
-    reviewed: confidence === 'HIGH',
+    // No alternatives cannot be reviewed into a match; count it as skipped.
+    reviewed: confidence === 'HIGH' || !best,
   };
 }

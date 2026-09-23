@@ -17,13 +17,14 @@ import {
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { ChevronLeft, Check, ExternalLink, Link2, X } from 'lucide-react-native';
+import { ChevronDown, ChevronLeft, Check, ExternalLink, FileText, FolderOpen, Link2, Play, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, FONTS, SIZES } from '../constants/theme';
-import { messageFor } from '../core/errors';
+import { AppError, messageFor } from '../core/errors';
+import { useSnackbar } from '../components/common/SnackbarContext';
 import { useLibrary } from '../hooks/useLibrary';
 import { playlistImportEngine } from '../features/playlistImport/runtime';
-import { SpotifyAuthService } from '../features/playlistImport/spotifyAuth';
+import { pickPlaylistFile } from '../features/playlistImport/filePicker';
 import {
   ImportProgress,
   PreparedImport,
@@ -36,18 +37,27 @@ type ImportNavigation = NativeStackNavigationProp<{
   ImportPlaylist: { url?: string } | undefined;
   Playlist: { playlistId: string };
 }>;
-type Phase = 'idle' | 'fetching' | 'matching' | 'preview' | 'review' | 'saving' | 'success';
+type Phase = 'idle' | 'picking' | 'fetching' | 'matching' | 'preview' | 'review' | 'saving' | 'success';
 const SPOTIFY_LOGO = require('../../assets/spotify-full-logo-white.png');
+const SPOTIFY_EXPORT_URL = 'https://www.tunemymusic.com/transfer/spotify-to-file';
+const TUNEMYMUSIC_URL = 'https://www.tunemymusic.com/';
 
 export default function ImportPlaylistScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const navigation = useNavigation<ImportNavigation>();
+  const { show: showSnackbar } = useSnackbar();
   const route = useRoute<ImportRoute>();
-  const { playlists, createImportedPlaylist } = useLibrary();
+  const { playlists, createImportedPlaylist, createPlaylist } = useLibrary();
   const abortRef = useRef<AbortController | null>(null);
+  const savingRef = useRef(false);
 
-  const [url, setUrl] = useState(route.params?.url ?? '');
+  const sharedUrl = route.params?.url ?? '';
+  const [url, setUrl] = useState(
+    playlistImportEngine.detect(sharedUrl)?.source === 'youtube' ? sharedUrl : ''
+  );
+  const [fileOrigin, setFileOrigin] = useState<'spotify' | 'other'>('other');
+  const [howOpen, setHowOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [progress, setProgress] = useState<ImportProgress | null>(null);
   const [sourcePlaylist, setSourcePlaylist] = useState<SourcePlaylist | null>(null);
@@ -57,6 +67,7 @@ export default function ImportPlaylistScreen() {
   const [savedId, setSavedId] = useState<string | null>(null);
 
   const parsed = useMemo(() => playlistImportEngine.detect(url), [url]);
+  const youtubeDetected = parsed?.source === 'youtube';
   const collision = useMemo(
     () => (sourcePlaylist ? playlistImportEngine.collisionFor(sourcePlaylist, playlists) : null),
     [sourcePlaylist, playlists]
@@ -71,15 +82,16 @@ export default function ImportPlaylistScreen() {
   );
   const prepared = useMemo<PreparedImport | null>(() => {
     if (!sourcePlaylist) return null;
-    return sourcePlaylist.source === 'spotify'
-      ? playlistImportEngine.prepareSpotify(sourcePlaylist, matches)
-      : playlistImportEngine.prepareYouTube(sourcePlaylist);
+    return sourcePlaylist.source === 'youtube'
+      ? playlistImportEngine.prepareYouTube(sourcePlaylist)
+      : playlistImportEngine.prepareMatched(sourcePlaylist, matches);
   }, [sourcePlaylist, matches]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => {
     const announcements: Partial<Record<Phase, string>> = {
+      picking: 'Choose a playlist file',
       fetching: 'Loading playlist',
       matching: 'Matching playlist tracks',
       preview: 'Playlist import preview ready',
@@ -101,10 +113,11 @@ export default function ImportPlaylistScreen() {
     setPlaylistName('');
     setError(null);
     setSavedId(null);
+    savingRef.current = false;
   };
 
   const startImport = async () => {
-    if (!parsed || phase === 'fetching' || phase === 'matching') return;
+    if (!parsed || parsed.source !== 'youtube' || phase !== 'idle' || abortRef.current) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setError(null);
@@ -120,23 +133,51 @@ export default function ImportPlaylistScreen() {
       const nextCollision = playlistImportEngine.collisionFor(fetched, playlists);
       setPlaylistName(nextCollision.suggestedName);
 
-      if (fetched.source === 'spotify') {
-        setPhase('matching');
-        setProgress({ phase: 'matching', completed: 0, total: fetched.tracks.length });
-        const resolved = await playlistImportEngine.matchSpotify(
-          fetched,
-          controller.signal,
-          setProgress
-        );
-        if (controller.signal.aborted) return;
-        setMatches(resolved);
-      }
-
       setPhase('preview');
     } catch (cause) {
-      if (!controller.signal.aborted) setError(messageFor(cause));
+      if (!controller.signal.aborted) {
+        const text = messageFor(cause);
+        setError(text);
+        showSnackbar(text);
+      }
       else setError('Import cancelled. Nothing was saved.');
       setPhase('idle');
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  };
+
+  const chooseFile = async (origin: 'spotify' | 'other') => {
+    if (phase !== 'idle' || abortRef.current) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setFileOrigin(origin);
+    setError(null);
+    setPhase('picking');
+    try {
+      const fetched = await pickPlaylistFile();
+      if (controller.signal.aborted) return;
+      if (!fetched) { setPhase('idle'); return; }
+      setSourcePlaylist(fetched);
+      setPlaylistName(playlistImportEngine.collisionFor(fetched, playlists).suggestedName);
+      setMatches([]);
+      setPhase('matching');
+      setProgress({ phase: 'matching', completed: 0, total: fetched.tracks.length });
+      const resolved = await playlistImportEngine.matchMetadata(fetched, controller.signal, setProgress);
+      if (controller.signal.aborted) return;
+      setMatches(resolved);
+      setPhase('preview');
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        const text = cause instanceof AppError
+          ? messageFor(cause)
+          : 'Could not read that file. Choose a CSV or TXT playlist export and try again.';
+        setError(text);
+        showSnackbar(text);
+        setSourcePlaylist(null);
+        setMatches([]);
+        setPhase('idle');
+      }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }
@@ -166,7 +207,7 @@ export default function ImportPlaylistScreen() {
   };
 
   const save = () => {
-    if (!sourcePlaylist || !prepared || !playlistName.trim() || nameTaken) return;
+    if (savingRef.current || !sourcePlaylist || !prepared || !playlistName.trim() || nameTaken) return;
     if (prepared.needsReview > 0) {
       setPhase('review');
       return;
@@ -176,9 +217,12 @@ export default function ImportPlaylistScreen() {
       return;
     }
 
+    savingRef.current = true;
     setPhase('saving');
     try {
-      const saved = createImportedPlaylist(
+      const saved = sourcePlaylist.source === 'file'
+        ? createPlaylist(playlistName, prepared.tracks)
+        : createImportedPlaylist(
         playlistName,
         prepared.tracks,
         {
@@ -202,23 +246,34 @@ export default function ImportPlaylistScreen() {
       setSavedId(saved.id);
       setPhase('success');
     } catch (cause) {
+      savingRef.current = false;
       setError(messageFor(cause));
       setPhase('preview');
     }
   };
 
-  const reviewItems = matches.filter((match) => match.confidence !== 'HIGH');
-  const isWorking = phase === 'fetching' || phase === 'matching';
+  const reviewItems = matches.filter((match) => match.confidence === 'MEDIUM' || match.confidence === 'LOW');
+  const isWorking = phase === 'picking' || phase === 'fetching' || phase === 'matching';
   const contentWidth = Math.min(Math.max(width - SIZES.lg * 2, 0), 680);
 
   const openSourceUrl = async () => {
-    if (!sourcePlaylist) return;
+    if (!sourcePlaylist || sourcePlaylist.source === 'file') return;
     try {
       const canOpen = await Linking.canOpenURL(sourcePlaylist.sourcePlaylistUrl);
       if (!canOpen) throw new Error('Unsupported external URL');
       await Linking.openURL(sourcePlaylist.sourcePlaylistUrl);
     } catch {
       setError(`Couldn't open the original ${sourcePlaylist.source === 'spotify' ? 'Spotify' : 'YouTube'} playlist.`);
+    }
+  };
+
+  const openExternal = async (target: string) => {
+    try {
+      await Linking.openURL(target);
+    } catch {
+      const text = 'Could not open your browser. Try the export link from a browser on your device.';
+      setError(text);
+      showSnackbar(text);
     }
   };
 
@@ -336,11 +391,12 @@ export default function ImportPlaylistScreen() {
               Imported {prepared.tracks.length} of{' '}
               {sourcePlaylist?.declaredTrackCount ?? sourcePlaylist?.tracks.length ?? 0} tracks.
             </Text>
-            {sourcePlaylist?.source === 'spotify' && (
+            {sourcePlaylist?.source !== 'youtube' && (
               <View style={styles.summaryList}>
                 <Summary label="Matched automatically" value={prepared.automaticallyMatched} />
                 <Summary label="Chosen during review" value={prepared.reviewedMatches} />
                 <Summary label="Unavailable or unmatched" value={prepared.unavailableCount} />
+                {prepared.duplicateCount > 0 && <Summary label="Duplicate matches skipped" value={prepared.duplicateCount} />}
               </View>
             )}
             <TouchableOpacity
@@ -355,62 +411,104 @@ export default function ImportPlaylistScreen() {
           </View>
         ) : (
           <View>
-            <Text style={styles.title}>Bring a playlist to Vibe2X</Text>
-            <Text style={styles.body}>
-              Paste a YouTube, YouTube Music, or Spotify playlist link. Spotify supplies metadata only;
-              every saved track is matched to Vibe2X playback.
-            </Text>
+            <Text style={styles.title}>Bring your music with you.</Text>
+            <Text style={styles.body}>Choose how you want to bring a playlist into Vibe2X.</Text>
 
-            <Text style={styles.label}>Playlist URL</Text>
-            <View style={[styles.inputWrap, error && !url ? styles.inputError : null]}>
-              <Link2 color={COLORS.text.muted} size={20} />
-              <TextInput
-                style={styles.input}
-                value={url}
-                onChangeText={(value) => {
-                  setUrl(value);
-                  setError(null);
-                  if (sourcePlaylist) reset();
-                }}
-                editable={!isWorking && phase !== 'saving'}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                placeholder="https://open.spotify.com/playlist/…"
-                placeholderTextColor={COLORS.text.secondary}
-                returnKeyType="go"
-                onSubmitEditing={startImport}
-              />
-            </View>
-            <View style={styles.detectedRow}>
-              <Text style={styles.detectedLabel}>Detected source</Text>
-              <Text style={[styles.detectedValue, !parsed && url ? styles.invalidText : null]}>
-                {parsed ? (parsed.source === 'spotify' ? 'Spotify playlist detected ✓' : 'YouTube playlist detected ✓') : url ? 'Unsupported link' : '—'}
-              </Text>
-            </View>
+            {!sourcePlaylist && !isWorking && (
+              <View style={styles.methods}>
+                <View style={[styles.methodCard, styles.youtubeCard]}>
+                  <View style={styles.methodHeading}>
+                    <View style={styles.youtubeMark}><Play color="#FFFFFF" fill="#FFFFFF" size={19} /></View>
+                    <View style={styles.methodHeadingText}>
+                      <Text style={styles.methodTitle}>YouTube / YouTube Music</Text>
+                      <Text style={styles.methodKind}>Direct playlist link</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.methodBody}>Paste a YouTube or YouTube Music playlist link and Vibe2X will import it directly.</Text>
+                  <View style={styles.inputWrap}>
+                    <Link2 color={COLORS.text.secondary} size={20} />
+                    <TextInput
+                      style={styles.input}
+                      value={url}
+                      onChangeText={(value) => { setUrl(value); setError(null); }}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="url"
+                      placeholder="Paste playlist link"
+                      placeholderTextColor={COLORS.text.secondary}
+                      returnKeyType="go"
+                      onSubmitEditing={startImport}
+                      accessibilityLabel="YouTube playlist link"
+                    />
+                  </View>
+                  {!!url && (
+                    <Text style={[styles.linkState, !youtubeDetected && styles.invalidText]} accessibilityLiveRegion="polite">
+                      {youtubeDetected ? 'YouTube playlist detected ✓' : parsed?.source === 'spotify' ? 'Use the Spotify file method below.' : 'Enter a YouTube playlist link.'}
+                    </Text>
+                  )}
+                  <TouchableOpacity style={[styles.methodPrimary, !youtubeDetected && styles.buttonDisabled]} onPress={startImport} disabled={!youtubeDetected} accessibilityRole="button" accessibilityLabel="Import from YouTube">
+                    <Text style={styles.methodPrimaryText}>Import from YouTube</Text>
+                  </TouchableOpacity>
+                </View>
 
-            {parsed?.source === 'spotify' && !SpotifyAuthService.isConfigured() && (
-              <Text style={styles.notice}>
-                Spotify import needs a public client ID configured by the app builder. No client secret is used or stored.
-              </Text>
+                <View style={[styles.methodCard, styles.spotifyCard]}>
+                  <View style={styles.methodHeading}>
+                    <Image source={SPOTIFY_LOGO} style={styles.spotifyBrand} resizeMode="contain" />
+                    <View style={styles.methodHeadingText}>
+                      <Text style={styles.methodTitle}>Spotify</Text>
+                      <Text style={styles.methodKind}>Export → file → Vibe2X</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.methodBody}>Move your Spotify playlist into Vibe2X using a playlist export file.</Text>
+                  {playlistImportEngine.detect(sharedUrl)?.source === 'spotify' && (
+                    <Text style={styles.externalNote}>Spotify link received. Export that playlist first, then choose the downloaded file here.</Text>
+                  )}
+                  <ImportStep number="1" title="Export" detail="Open TuneMyMusic and export your Spotify playlist to CSV or TXT." />
+                  <ImportStep number="2" title="Download" detail="Save the exported playlist file to your device." />
+                  <ImportStep number="3" title="Import" detail="Come back to Vibe2X and choose the downloaded file." />
+                  <Text style={styles.externalNote}>TuneMyMusic is an external service that can export your playlist. It is not affiliated with Vibe2X.</Text>
+                  <TouchableOpacity style={styles.externalButton} onPress={() => void openExternal(SPOTIFY_EXPORT_URL)} accessibilityRole="link" accessibilityLabel="Open Spotify export guide in browser">
+                    <Text style={styles.externalButtonText}>Open Spotify export guide</Text><ExternalLink size={18} color={COLORS.text.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.fileButton} onPress={() => void chooseFile('spotify')} accessibilityRole="button" accessibilityLabel="Choose CSV or TXT file exported from Spotify">
+                    <FileText size={18} color={COLORS.background} /><Text style={styles.fileButtonText}>Choose CSV / TXT file</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.methodCard, styles.otherCard]}>
+                  <View style={styles.methodHeading}>
+                    <View style={styles.otherMark}><FolderOpen size={21} color={COLORS.text.primary} /></View>
+                    <View style={styles.methodHeadingText}>
+                      <Text style={styles.methodTitle}>Another music service</Text>
+                      <Text style={styles.methodKind}>File Import · CSV or TXT</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.methodBody}>Coming from Apple Music, Deezer, TIDAL, Amazon Music or somewhere else? Export your playlist as a supported file and bring it into Vibe2X.</Text>
+                  <Text style={styles.methodBody}>Export a CSV or TXT playlist file, download it to your device, then choose it here.</Text>
+                  <TouchableOpacity style={styles.externalButton} onPress={() => void openExternal(TUNEMYMUSIC_URL)} accessibilityRole="link" accessibilityLabel="Open TuneMyMusic in browser">
+                    <Text style={styles.externalButtonText}>Open TuneMyMusic</Text><ExternalLink size={18} color={COLORS.text.primary} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.fileButton} onPress={() => void chooseFile('other')} accessibilityRole="button" accessibilityLabel="Choose playlist file">
+                    <FileText size={18} color={COLORS.background} /><Text style={styles.fileButtonText}>Choose playlist file</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity style={styles.howButton} onPress={() => setHowOpen((open) => !open)} accessibilityRole="button" accessibilityState={{ expanded: howOpen }} accessibilityLabel="How does file import work?">
+                  <Text style={styles.howTitle}>How does this work?</Text><ChevronDown size={19} color={COLORS.text.secondary} style={howOpen ? styles.chevronOpen : undefined} />
+                </TouchableOpacity>
+                {howOpen && <Text style={styles.howBody}>Vibe2X does not need your Spotify password. Use an external export service to download a CSV or TXT file. Vibe2X reads that file, searches for playable tracks, asks you to review uncertain matches, and saves a normal local playlist.</Text>}
+              </View>
             )}
-            {parsed?.source === 'spotify' && SpotifyAuthService.isConfigured() && !sourcePlaylist && (
-              <Text style={styles.notice}>
-                Spotify currently exposes playlist items only for playlists you own or collaborate on.
-              </Text>
-            )}
 
-            {isWorking && progress ? (
+            {isWorking ? (
               <View style={styles.progressBlock} accessibilityLiveRegion="polite">
                 <ActivityIndicator color={COLORS.accent.magenta} />
                 <Text style={styles.progressTitle}>
-                  {progress.phase === 'matching'
+                  {phase === 'picking' ? 'Choose a CSV or TXT playlist file…' : progress?.phase === 'matching'
                     ? `Matching ${progress.completed} / ${progress.total}…`
-                    : parsed?.source === 'spotify'
-                      ? 'Fetching Spotify playlist…'
-                      : 'Loading YouTube playlist…'}
+                    : 'Loading YouTube playlist…'}
                 </Text>
-                {progress.phase === 'fetching' && progress.loaded > 0 && (
+                {progress?.phase === 'fetching' && progress.loaded > 0 && (
                   <Text style={styles.progressDetail}>
                     {progress.loaded}{progress.total ? ` / ${progress.total}` : ''} tracks
                   </Text>
@@ -423,10 +521,10 @@ export default function ImportPlaylistScreen() {
               <View style={styles.previewBlock}>
                 <Text style={styles.previewName}>{sourcePlaylist.name}</Text>
                 <Text style={styles.previewMeta}>
-                  {sourcePlaylist.source === 'spotify' ? 'Spotify' : 'YouTube'} ·{' '}
+                  {sourcePlaylist.source === 'file' ? (fileOrigin === 'spotify' ? 'Spotify export file' : 'File Import') : sourcePlaylist.source === 'spotify' ? 'Spotify' : 'YouTube'} ·{' '}
                   {sourcePlaylist.declaredTrackCount ?? sourcePlaylist.tracks.length} tracks
                 </Text>
-                <TouchableOpacity
+                {sourcePlaylist.source !== 'file' && <TouchableOpacity
                   style={styles.sourceLink}
                   onPress={openSourceUrl}
                 >
@@ -438,13 +536,15 @@ export default function ImportPlaylistScreen() {
                   <Text style={styles.sourceLinkText}>
                     {sourcePlaylist.source === 'spotify' ? 'OPEN SPOTIFY' : 'Open original in YouTube'}
                   </Text>
-                </TouchableOpacity>
+                </TouchableOpacity>}
 
-                {sourcePlaylist.source === 'spotify' && (
+                {sourcePlaylist.source !== 'youtube' && (
                   <View style={styles.summaryList}>
+                    <Summary label="Found tracks" value={sourcePlaylist.tracks.length} />
                     <Summary label="Matched automatically" value={prepared.automaticallyMatched} />
                     <Summary label="Need review" value={prepared.needsReview} />
                     <Summary label="Unavailable or unmatched" value={prepared.unavailableCount} />
+                    {prepared.duplicateCount > 0 && <Summary label="Duplicate matches skipped" value={prepared.duplicateCount} />}
                   </View>
                 )}
                 {(sourcePlaylist.unavailableCount > 0 || prepared.duplicateCount > 0) && (
@@ -484,31 +584,24 @@ export default function ImportPlaylistScreen() {
                     <Text style={styles.secondaryButtonText}>Review {prepared.needsReview} matches</Text>
                   </TouchableOpacity>
                 )}
+                {!prepared.tracks.length && (
+                  <Text style={styles.notice}>No playable Vibe2X matches were found. Try an export with clear track and artist names.</Text>
+                )}
                 <TouchableOpacity
                   style={[
                     styles.primaryButton,
-                    (!playlistName.trim() || nameTaken || prepared.needsReview > 0 || !prepared.tracks.length) &&
+                    (phase === 'saving' || !playlistName.trim() || nameTaken || prepared.needsReview > 0 || !prepared.tracks.length) &&
                       styles.buttonDisabled,
                   ]}
                   onPress={save}
-                  disabled={!playlistName.trim() || nameTaken || prepared.needsReview > 0 || !prepared.tracks.length}
+                  disabled={phase === 'saving' || !playlistName.trim() || nameTaken || prepared.needsReview > 0 || !prepared.tracks.length}
                 >
                   <Text style={styles.primaryButtonText}>
-                    {phase === 'saving' ? 'Saving…' : collision?.sameSource ? 'Create copy' : 'Save playlist'}
+                    {phase === 'saving' ? 'Saving…' : collision?.sameSource ? 'Create copy' : sourcePlaylist.source === 'file' ? 'Finish Import' : 'Save playlist'}
                   </Text>
                 </TouchableOpacity>
               </View>
-            ) : (
-              <TouchableOpacity
-                style={[styles.primaryButton, !parsed && styles.buttonDisabled]}
-                onPress={startImport}
-                disabled={!parsed}
-              >
-                <Text style={styles.primaryButtonText}>
-                  {parsed?.source === 'spotify' ? 'Connect Spotify & import' : 'Import'}
-                </Text>
-              </TouchableOpacity>
-            )}
+            ) : null}
 
             {error && <Text style={styles.error}>{error}</Text>}
           </View>
@@ -524,6 +617,18 @@ function Summary({ label, value }: { label: string; value: number }) {
     <View style={styles.summaryRow}>
       <Text style={styles.summaryLabel}>{label}</Text>
       <Text style={styles.summaryValue}>{value}</Text>
+    </View>
+  );
+}
+
+function ImportStep({ number, title, detail }: { number: string; title: string; detail: string }) {
+  return (
+    <View style={styles.step}>
+      <View style={styles.stepNumber}><Text style={styles.stepNumberText}>{number}</Text></View>
+      <View style={styles.stepCopy}>
+        <Text style={styles.stepTitle}>{title}</Text>
+        <Text style={styles.stepDetail}>{detail}</Text>
+      </View>
     </View>
   );
 }
@@ -603,4 +708,35 @@ const styles = StyleSheet.create({
   skipButtonText: { color: COLORS.text.secondary, fontFamily: FONTS.medium, fontSize: 13 },
   successBlock: { alignItems: 'stretch', paddingTop: SIZES.xl },
   successIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.text.primary, alignItems: 'center', justifyContent: 'center', marginBottom: SIZES.lg },
+  methods: { gap: SIZES.md },
+  methodCard: { backgroundColor: COLORS.surfaceRaised, borderRadius: SIZES.radius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: COLORS.glassBorder, padding: SIZES.md },
+  youtubeCard: { backgroundColor: '#1C181B' },
+  spotifyCard: { backgroundColor: '#171B19' },
+  otherCard: { backgroundColor: COLORS.surfaceRaised },
+  methodHeading: { flexDirection: 'row', alignItems: 'center', gap: SIZES.sm, marginBottom: SIZES.md },
+  methodHeadingText: { flex: 1 },
+  methodTitle: { fontFamily: FONTS.bold, fontSize: 17, color: COLORS.text.primary },
+  methodKind: { fontFamily: FONTS.medium, fontSize: 12, color: COLORS.text.secondary, marginTop: 2 },
+  methodBody: { fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, color: COLORS.text.secondary, marginBottom: SIZES.md },
+  youtubeMark: { width: 42, height: 32, borderRadius: 9, backgroundColor: '#FF0033', alignItems: 'center', justifyContent: 'center' },
+  spotifyBrand: { width: 76, height: 26, marginRight: 2 },
+  otherMark: { width: 42, height: 42, borderRadius: SIZES.radius.sm, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  linkState: { fontFamily: FONTS.medium, fontSize: 13, color: COLORS.text.primary, marginTop: SIZES.sm },
+  methodPrimary: { minHeight: 52, marginTop: SIZES.md, borderRadius: SIZES.radius.pill, backgroundColor: COLORS.text.primary, justifyContent: 'center', alignItems: 'center', paddingHorizontal: SIZES.md },
+  methodPrimaryText: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.background },
+  step: { flexDirection: 'row', alignItems: 'flex-start', gap: SIZES.sm, marginBottom: SIZES.sm },
+  stepNumber: { width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  stepNumberText: { fontFamily: FONTS.bold, fontSize: 12, color: COLORS.text.primary },
+  stepCopy: { flex: 1 },
+  stepTitle: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary },
+  stepDetail: { fontFamily: FONTS.regular, fontSize: 13, lineHeight: 19, color: COLORS.text.secondary, marginTop: 2 },
+  externalNote: { fontFamily: FONTS.regular, fontSize: 12, lineHeight: 18, color: COLORS.text.secondary, marginTop: SIZES.sm },
+  externalButton: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SIZES.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: COLORS.glassBorder, borderRadius: SIZES.radius.pill, marginTop: SIZES.md, paddingHorizontal: SIZES.sm },
+  externalButtonText: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary },
+  fileButton: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SIZES.sm, borderRadius: SIZES.radius.pill, backgroundColor: COLORS.text.primary, marginTop: SIZES.sm, paddingHorizontal: SIZES.sm },
+  fileButtonText: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.background },
+  howButton: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SIZES.sm },
+  howTitle: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary },
+  chevronOpen: { transform: [{ rotate: '180deg' }] },
+  howBody: { fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, color: COLORS.text.secondary, paddingHorizontal: SIZES.sm, marginBottom: SIZES.md },
 });

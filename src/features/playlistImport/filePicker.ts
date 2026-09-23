@@ -1,0 +1,24 @@
+import * as DocumentPicker from 'expo-document-picker';
+import { File } from 'expo-file-system';
+import { appErrorWithMessage } from '../../core/errors';
+import { parsePlaylistFile } from './fileSource';
+import { SourcePlaylist } from './types';
+
+type Pick = typeof DocumentPicker.getDocumentAsync;
+type Read = (uri: string) => Promise<string>;
+
+/** System picker, then local-only read. A cancelled picker has no import side effects. */
+export async function pickPlaylistFile(
+  pick: Pick = DocumentPicker.getDocumentAsync,
+  read: Read = (uri) => new File(uri).text()
+): Promise<SourcePlaylist | null> {
+  const result = await pick({ type: '*/*', copyToCacheDirectory: true, multiple: false });
+  if (result.canceled) return null;
+  const asset = result.assets[0];
+  if (!asset) return null;
+  if (asset.size && asset.size > 5_000_000) {
+    throw appErrorWithMessage('invalid_playlist', 'This playlist file is too large. Use an export smaller than 5 MB.');
+  }
+  const contents = asset.file ? await asset.file.text() : await read(asset.uri);
+  return parsePlaylistFile(asset.name, contents);
+}
