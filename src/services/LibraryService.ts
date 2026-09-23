@@ -8,6 +8,7 @@
 import { appErrorWithMessage } from '../core/errors';
 import { Playlist, Track } from '../core/types';
 import { getListenHistory, logPlay, clearListenHistory, batchLogPlays, HistoryEntry } from '../core/lie';
+import { addSearchHistory, normalizeSearchHistory, removeSearchHistory } from '../core/searchHistory';
 
 export { HistoryEntry };
 export type Gender = 'male' | 'female' | 'unspecified';
@@ -120,7 +121,7 @@ class LibraryServiceImpl {
       ...stored,
       profile: { ...DEFAULT_PROFILE, ...(stored.profile ?? {}) },
     };
-    this.searchHistory = Array.isArray(searchHistoryRaw) ? searchHistoryRaw : [];
+    this.searchHistory = normalizeSearchHistory(Array.isArray(searchHistoryRaw) ? searchHistoryRaw : []);
     
     // SQLite Migration for Listening Intelligence Engine (Phase 4)
     const legacyHistory = Array.isArray(listenHistoryRaw) ? listenHistoryRaw : [];
@@ -340,15 +341,23 @@ class LibraryServiceImpl {
 
   recordSearch(query: string): void {
     const q = query.trim();
-    if (q.length < 2) return;
+    if (!q) return;
 
-    this.searchHistory = [q, ...this.searchHistory.filter((s) => s !== q)].slice(0, 12);
+    this.searchHistory = addSearchHistory(this.searchHistory, q);
     writeJsonDebounced(STORAGE_KEYS.searchHistory, this.searchHistory, 1000);
+    this.notifyChanged();
+  }
+
+  removeSearchHistory(query: string): void {
+    this.searchHistory = removeSearchHistory(this.searchHistory, query);
+    writeJsonDebounced(STORAGE_KEYS.searchHistory, this.searchHistory, 1000);
+    this.notifyChanged();
   }
 
   clearSearchHistory(): void {
     this.searchHistory = [];
     void writeJson(STORAGE_KEYS.searchHistory, []);
+    this.notifyChanged();
   }
 
   /**
@@ -423,6 +432,7 @@ class LibraryServiceImpl {
   updateSettings(patch: Partial<AppSettings>): AppSettings {
     this.settings = { ...this.settings, ...patch };
     void writeJson(STORAGE_KEYS.settings, this.settings);
+    this.notifyChanged();
     return this.getSettings();
   }
 }
@@ -432,11 +442,12 @@ class LibraryServiceImpl {
  * restoring a library full of dead links.
  */
 function stripStream(track: Track): Track {
+  const { isAutoSuggested: _queueOnly, ...libraryTrack } = track;
   // MediaLibrary URIs identify on-device files and are required to replay a
   // saved local track. Only provider stream URLs are short-lived credentials.
-  if (track.provider === 'local') return track;
-  if (!track.audioUrl) return track;
-  const { audioUrl, ...rest } = track;
+  if (libraryTrack.provider === 'local') return libraryTrack;
+  if (!libraryTrack.audioUrl) return libraryTrack;
+  const { audioUrl, ...rest } = libraryTrack;
   return rest;
 }
 

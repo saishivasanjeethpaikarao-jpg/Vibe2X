@@ -92,7 +92,7 @@ jobs:
           ditto -c -k --keepParent "$app" "$archive"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "iOS simulator app built without signing: com.vibe2x.app ($version)" >> "$GITHUB_STEP_SUMMARY"
+          echo "iOS simulator app built without signing: io.github.saishivasanjeethpaikarao.vibe2x ($version)" >> "$GITHUB_STEP_SUMMARY"
           echo "Native deep-link and OAuth schemes registered; authentication round trip not tested." >> "$GITHUB_STEP_SUMMARY"
           echo "Physical iPhone installation and playback are not verified." >> "$GITHUB_STEP_SUMMARY"
 

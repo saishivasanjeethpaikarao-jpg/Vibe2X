@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Check, Heart, ListMusic, Plus, X, Ban } from 'lucide-react-native';
+import { Check, Heart, ListMusic, ListPlus, Plus, X, Ban } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../../constants/theme';
 import { Track } from '../../core/types';
 import { useLibrary } from '../../hooks/useLibrary';
@@ -16,6 +16,7 @@ import { suppressTrack } from '../../core/lie';
 import { LiquidSheet } from '../liquid/LiquidSheet';
 import { confirmLocalMutation } from '../../core/confirmedMutation';
 import { useSnackbar } from '../common/SnackbarContext';
+import { usePlayer } from '../../hooks/usePlayer';
 
 type Props = {
   /** The track being filed. Null closes the sheet. */
@@ -32,6 +33,7 @@ type Props = {
  */
 export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
   const { show } = useSnackbar();
+  const { addToQueue } = usePlayer();
   const {
     playlists,
     addToPlaylist,
@@ -196,6 +198,18 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
         )}
 
         <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+          <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() => {
+              if (track && addToQueue(track)) { close(); show('Added to queue'); }
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Add to queue"
+          >
+            <View style={styles.rowIcon}><ListPlus color={COLORS.text.primary} size={20} /></View>
+            <Text style={styles.rowLabel}>Add to queue</Text>
+          </TouchableOpacity>
           {/* Liked Songs is synthetic, so it toggles the like instead. */}
           <TouchableOpacity
             style={styles.row}

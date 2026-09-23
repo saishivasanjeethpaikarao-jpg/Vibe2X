@@ -59,6 +59,7 @@ export class PlaybackEngine {
   private loadTimer: ReturnType<typeof setTimeout> | null = null;
   /** Set while we are swapping sources, so stale status events are ignored. */
   private loadToken = 0;
+  private pendingActivation: { token: number; resolve: () => void; reject: (error: Error) => void } | null = null;
   private completionFired = false;
 
   private configured = false;
@@ -132,13 +133,15 @@ export class PlaybackEngine {
     const position = Number.isFinite(s?.currentTime) ? Math.max(0, s.currentTime) : 0;
 
     // A source that has started reporting time is no longer "loading".
-    if (s?.isLoaded && this.loadTimer) {
+    if (s?.isLoaded && s?.playing && this.loadTimer) {
       clearTimeout(this.loadTimer);
       this.loadTimer = null;
     }
 
     if (s?.error) {
       this.clearLoadTimer();
+      this.pendingActivation?.reject(new Error(String(s.error)));
+      this.pendingActivation = null;
       this.listeners.onError?.(appError('playback_failed', String(s.error)));
       return;
     }
@@ -160,6 +163,11 @@ export class PlaybackEngine {
     };
 
     this.listeners.onStatus?.(this.status);
+
+    if (s?.isLoaded && s?.playing && this.pendingActivation?.token === this.loadToken) {
+      this.pendingActivation.resolve();
+      this.pendingActivation = null;
+    }
 
     // Once the source is genuinely playing, the service is bound and the
     // notification will accept metadata.
@@ -183,14 +191,17 @@ export class PlaybackEngine {
   async load(
     track: Track,
     stream: ResolvedStream,
-    options: { autoPlay?: boolean; startPosition?: number } = {}
+    options: { autoPlay?: boolean; startPosition?: number; isCurrent?: () => boolean } = {}
   ): Promise<void> {
     const { autoPlay = true, startPosition = 0 } = options;
     const token = ++this.loadToken;
+    this.pendingActivation?.reject(new Error('Playback request superseded'));
+    this.pendingActivation = null;
 
     try {
       const player = this.ensurePlayer();
       await this.configure();
+      if (token !== this.loadToken || options.isCurrent?.() === false) return;
 
       this.currentTrackId = track.id;
       this.completionFired = false;
@@ -207,7 +218,9 @@ export class PlaybackEngine {
       this.clearLoadTimer();
       this.loadTimer = setTimeout(() => {
         if (token !== this.loadToken) return;
-        if (this.status.isLoaded) return;
+        if (this.status.isLoaded && this.status.isPlaying) return;
+        this.pendingActivation?.reject(new Error('Stream did not start'));
+        this.pendingActivation = null;
         this.listeners.onError?.(appError('playback_failed', 'Stream did not start'));
       }, 20_000);
 
@@ -219,11 +232,17 @@ export class PlaybackEngine {
         }
       }
 
-      if (autoPlay) player.play();
+      if (token !== this.loadToken || options.isCurrent?.() === false) return;
 
+      const activated = autoPlay ? new Promise<void>((resolve, reject) => {
+        this.pendingActivation = { token, resolve, reject };
+      }) : Promise.resolve();
       this.setLockScreenMetadata(track);
+      if (autoPlay) player.play();
+      await activated;
     } catch (e) {
       this.clearLoadTimer();
+      this.pendingActivation = null;
       throw toAppError(e, 'playback_failed');
     }
   }
@@ -283,6 +302,8 @@ export class PlaybackEngine {
   stop(): void {
     this.clearLoadTimer();
     this.loadToken++;
+    this.pendingActivation?.reject(new Error('Playback stopped'));
+    this.pendingActivation = null;
     this.currentTrackId = null;
     this.completionFired = false;
 

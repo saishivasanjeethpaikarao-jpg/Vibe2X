@@ -62,6 +62,50 @@ describe('Queue', () => {
     expect(queue.upcoming).toEqual([manualTrack, autoTrack]);
   });
 
+  it('manual additions override collection context and clear without removing auto', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A'), mockTrack('B'), mockTrack('C')], 0, 'Liked Songs');
+    queue.add(mockTrack('Auto', { isAutoSuggested: true }));
+    queue.add(mockTrack('X'));
+    expect(queue.upcoming.map((item) => item.id)).toEqual(['X', 'B', 'C', 'Auto']);
+    expect(queue.manualUpcoming.map((item) => item.id)).toEqual(['X']);
+    expect(queue.contextUpcoming.map((item) => item.id)).toEqual(['B', 'C']);
+    queue.clearManualUpcoming();
+    expect(queue.current?.id).toBe('A');
+    expect(queue.upcoming.map((item) => item.id)).toEqual(['B', 'C', 'Auto']);
+  });
+
+  it('promotes an automatic candidate when the user explicitly queues it', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    queue.add([mockTrack('B', { isAutoSuggested: true }), mockTrack('C', { isAutoSuggested: true })]);
+    expect(queue.add(mockTrack('C'))).toBe(1);
+    expect(queue.upcoming.map((item) => item.id)).toEqual(['C', 'B']);
+    expect(queue.manualUpcoming.map((item) => item.id)).toEqual(['C']);
+  });
+
+  it('stop at end of queue removes automatic continuation but preserves manual tracks', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    queue.add(mockTrack('B'));
+    queue.add(mockTrack('C', { isAutoSuggested: true }));
+    queue.clearAutoUpcoming();
+    expect(queue.upcoming.map((item) => item.id)).toEqual(['B']);
+    expect(queue.next(true)?.id).toBe('B');
+    expect(queue.next(true)).toBeNull();
+  });
+
+  it('restores exact manual/context/automatic playback order after restart', () => {
+    const before = new Queue();
+    before.setTracks([mockTrack('A'), mockTrack('B')], 0, 'Playlist');
+    before.add(mockTrack('C', { isAutoSuggested: true }));
+    before.add(mockTrack('X'));
+    const after = new Queue();
+    after.restore(before.snapshot());
+    expect(after.upcoming.map((item) => item.id)).toEqual(['X', 'B', 'C']);
+    expect(after.manualUpcoming.map((item) => item.id)).toEqual(['X']);
+  });
+
   it('Smart Continue tracks appended at end', () => {
     const queue = new Queue();
     queue.setTracks([mockTrack('A')]);

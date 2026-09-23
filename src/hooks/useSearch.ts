@@ -74,7 +74,6 @@ export function useSearch(): UseSearch {
 
       setResults(found);
       setIsSearching(false);
-      LibraryService.recordSearch(trimmed);
     } catch (e) {
       if (id !== requestId.current || controller.signal.aborted) return;
 
@@ -144,6 +143,7 @@ export function useSearch(): UseSearch {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       setQueryState(q);
       if (f) setFilterState(f);
+      if (q.trim()) LibraryService.recordSearch(q);
       void run(q, f ?? filter);
     },
     [filter, run]

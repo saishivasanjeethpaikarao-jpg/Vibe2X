@@ -77,6 +77,8 @@ export default function NowPlayingScreen() {
     canPlayCurrent,
     sleepTimerExpiration,
     setSleepTimer,
+    stopAtEndOfQueue,
+    setStopAtEndOfQueue,
   } = usePlayer();
   const { isLiked, toggleLike } = useLibrary();
   const { show } = useSnackbar();
@@ -319,6 +321,8 @@ export default function NowPlayingScreen() {
         onClose={() => setShowSleepTimer(false)}
         expiration={sleepTimerExpiration}
         onSetTimer={setSleepTimer}
+        stopAtEndOfQueue={stopAtEndOfQueue}
+        onStopAtEndOfQueue={setStopAtEndOfQueue}
       />
     </View>
   );

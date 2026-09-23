@@ -28,30 +28,38 @@ export default function QueueScreen() {
   const {
     currentTrack,
     upcoming,
+    manualUpcoming,
+    contextUpcoming,
+    autoUpcoming,
     queueContext,
     jumpTo,
     removeFromQueue,
     clearQueue,
     reorderQueue,
+    isPreparingAuto,
+    pendingTrack,
   } = usePlayer();
 
   const queueData = useMemo(() => {
     const data: QueueItem[] = [];
-    const manual = upcoming.filter(t => !t.isAutoSuggested);
-    const auto = upcoming.filter(t => t.isAutoSuggested);
-
     let trackIndex = 0;
-    if (manual.length > 0) {
+    if (manualUpcoming.length > 0) {
       data.push({ type: 'header', id: 'header-manual', title: 'Up next' });
-      data.push(...manual.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
+      data.push(...manualUpcoming.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
     }
-    if (auto.length > 0) {
+    if (contextUpcoming.length > 0) {
+      data.push({ type: 'header', id: 'header-context', title: queueContext ? `Playing next from ${queueContext}` : 'Playing next' });
+      data.push(...contextUpcoming.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
+    }
+    if (autoUpcoming.length > 0) {
       data.push({ type: 'header', id: 'header-auto', title: 'Smart Continue' });
-      data.push(...auto.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
+      data.push(...autoUpcoming.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
     }
     return data;
-  }, [upcoming]);
-  const manualCount = upcoming.filter((track) => !track.isAutoSuggested).length;
+  }, [manualUpcoming, contextUpcoming, autoUpcoming, queueContext]);
+  const manualCount = manualUpcoming.length;
+  const contextCount = contextUpcoming.length;
+  const contextIds = useMemo(() => new Set(contextUpcoming.map((track) => track.id)), [contextUpcoming]);
 
   const renderRightActions = (item: Track) => {
     return (
@@ -81,8 +89,9 @@ export default function QueueScreen() {
     const { track, originalIndex } = item;
     const isAuto = track.isAutoSuggested;
 
-    const firstInSection = isAuto ? manualCount : 0;
-    const lastInSection = isAuto ? upcoming.length - 1 : manualCount - 1;
+    const isContext = contextIds.has(track.id);
+    const firstInSection = isAuto ? manualCount + contextCount : isContext ? manualCount : 0;
+    const lastInSection = isAuto ? upcoming.length - 1 : isContext ? manualCount + contextCount - 1 : manualCount - 1;
     const reorderActions = [
       ...(originalIndex > firstInSection ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
       ...(originalIndex >= 0 && originalIndex < lastInSection
@@ -174,7 +183,7 @@ export default function QueueScreen() {
               {currentTrack?.isAutoSuggested ? 'Smart Continue' : queueContext || 'Vibe2X'}
             </Text>
           </View>
-          {upcoming.length > 0 ? (
+          {manualCount > 0 || upcoming.length > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <TouchableOpacity
                 style={styles.headerIcon}
@@ -189,15 +198,15 @@ export default function QueueScreen() {
               >
                 <ListPlus color={COLORS.text.secondary} size={20} />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.headerIcon}
-                onPress={clearQueue}
-                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                accessibilityRole="button"
-                accessibilityLabel="Clear queue"
-              >
-                <Text style={styles.clearText}>Clear</Text>
-              </TouchableOpacity>
+              {manualCount > 0 && <TouchableOpacity
+                  style={styles.clearUpNextButton}
+                  onPress={clearQueue}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear Up Next"
+                >
+                  <Text style={styles.clearText}>Clear Up Next</Text>
+                </TouchableOpacity>}
             </View>
           ) : (
             <View style={styles.headerIcon} />
@@ -225,13 +234,20 @@ export default function QueueScreen() {
           </View>
         )}
 
+        {pendingTrack && pendingTrack.id !== currentTrack?.id && (
+          <Text style={styles.sectionLabel}>Preparing {pendingTrack.title}…</Text>
+        )}
+        {isPreparingAuto && upcoming.every((track) => !track.isAutoSuggested) && (
+          <Text style={styles.sectionLabel}>Preparing Auto Continue…</Text>
+        )}
+
         {upcoming.length === 0 ? (
           <View style={styles.emptyState}>
             <Music color={COLORS.text.muted} size={48} />
-            <Text style={styles.emptyTitle}>Your queue is empty</Text>
+            <Text style={styles.emptyTitle}>{isPreparingAuto ? 'Finding what plays next' : 'Your queue is empty'}</Text>
             <Text style={styles.emptySubtitle}>
               {settings.autoplayRelated
-                ? 'No tracks queued. Smart Continue may add music after this track finishes.'
+                ? 'Auto Continue is finding music from your current track.'
                 : 'Search for songs to add to your queue.'}
             </Text>
             <TouchableOpacity
@@ -268,8 +284,10 @@ export default function QueueScreen() {
               const originalFrom = oldTracks.findIndex(t => t.id === movedItem.id);
               const originalTo = newTracks.findIndex(t => t.id === movedItem.id);
               const staysInSection = movedItem.track.isAutoSuggested
-                ? originalTo >= manualCount
-                : originalTo < manualCount;
+                ? originalTo >= manualCount + contextCount
+                : contextIds.has(movedItem.track.id)
+                  ? originalTo >= manualCount && originalTo < manualCount + contextCount
+                  : originalTo < manualCount;
 
               if (staysInSection && originalFrom !== -1 && originalTo !== -1 && originalFrom !== originalTo) {
                 reorderQueue(originalFrom, originalTo);
@@ -340,6 +358,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.accent.magenta,
   },
+  clearUpNextButton: { minWidth: 94, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',

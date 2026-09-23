@@ -9,6 +9,8 @@ type Props = {
   onClose: () => void;
   expiration: number | null;
   onSetTimer: (minutes: number | null) => void;
+  stopAtEndOfQueue: boolean;
+  onStopAtEndOfQueue: (enabled: boolean) => void;
 };
 
 const OPTIONS = [
@@ -19,7 +21,7 @@ const OPTIONS = [
   { label: '60 minutes', minutes: 60 },
 ];
 
-export function SleepTimerSheet({ visible, onClose, expiration, onSetTimer }: Props) {
+export function SleepTimerSheet({ visible, onClose, expiration, onSetTimer, stopAtEndOfQueue, onStopAtEndOfQueue }: Props) {
   let remaining = '';
   if (expiration) {
     const diff = Math.max(0, Math.ceil((expiration - Date.now()) / 60000));
@@ -66,6 +68,15 @@ export function SleepTimerSheet({ visible, onClose, expiration, onSetTimer }: Pr
             <Text style={styles.rowLabel}>{opt.label}</Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => { onStopAtEndOfQueue(!stopAtEndOfQueue); onClose(); }}
+          accessibilityRole="button"
+          accessibilityLabel={stopAtEndOfQueue ? 'Turn off stop at end of queue' : 'Stop at end of queue'}
+        >
+          <View style={styles.rowIcon}><Timer color={COLORS.text.primary} size={20} /></View>
+          <Text style={styles.rowLabel}>{stopAtEndOfQueue ? 'Stop at end of queue ✓' : 'Stop at end of queue'}</Text>
+        </TouchableOpacity>
       </View>
     </LiquidSheet>
   );

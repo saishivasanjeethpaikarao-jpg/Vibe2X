@@ -9,6 +9,11 @@ export type QueueSnapshot = {
   repeat: RepeatMode;
   /** Where this queue came from, shown as "PLAYING FROM" in Now Playing. */
   context: string;
+  /** Original collection entries are distinct from explicit Up Next actions. */
+  contextTrackIds?: string[];
+  /** Exact logical order; older snapshots without this field still restore. */
+  order?: number[];
+  position?: number;
 };
 
 export const EMPTY_QUEUE: QueueSnapshot = {
@@ -33,6 +38,7 @@ export class Queue {
   private shuffleOn = false;
   private repeatMode: RepeatMode = 'off';
   private contextLabel = '';
+  private contextTrackIds = new Set<string>();
 
   // ---- reads ------------------------------------------------------------
 
@@ -43,6 +49,18 @@ export class Queue {
   /** Upcoming tracks in the order they will actually play. */
   get upcoming(): Track[] {
     return this.order.slice(this.position + 1).map((i) => this.tracks[i]);
+  }
+
+  get manualUpcoming(): Track[] {
+    return this.upcoming.filter((track) => !track.isAutoSuggested && !this.contextTrackIds.has(track.id));
+  }
+
+  get contextUpcoming(): Track[] {
+    return this.upcoming.filter((track) => this.contextTrackIds.has(track.id));
+  }
+
+  get autoUpcoming(): Track[] {
+    return this.upcoming.filter((track) => track.isAutoSuggested);
   }
 
   get current(): Track | null {
@@ -88,6 +106,9 @@ export class Queue {
       shuffle: this.shuffleOn,
       repeat: this.repeatMode,
       context: this.contextLabel,
+      contextTrackIds: [...this.contextTrackIds],
+      order: [...this.order],
+      position: this.position,
     };
   }
 
@@ -96,19 +117,37 @@ export class Queue {
     this.shuffleOn = snapshot.shuffle ?? false;
     this.repeatMode = snapshot.repeat ?? 'off';
     this.contextLabel = snapshot.context ?? '';
+    this.contextTrackIds = new Set(snapshot.contextTrackIds ?? []);
 
-    this.rebuildOrder();
-
-    const startAt = snapshot.index ?? -1;
-    this.position = startAt >= 0 ? this.order.indexOf(startAt) : -1;
+    const storedOrder = snapshot.order;
+    const validOrder = Array.isArray(storedOrder) &&
+      storedOrder.length === this.tracks.length &&
+      new Set(storedOrder).size === this.tracks.length &&
+      storedOrder.every((index) => Number.isInteger(index) && index >= 0 && index < this.tracks.length);
+    if (validOrder) {
+      this.order = [...storedOrder];
+      const storedPosition = snapshot.position;
+      this.position = typeof storedPosition === 'number' && storedPosition >= -1 && storedPosition < this.order.length
+        ? storedPosition
+        : this.order.indexOf(snapshot.index ?? -1);
+    } else {
+      this.rebuildOrder();
+      const startAt = snapshot.index ?? -1;
+      this.position = startAt >= 0 ? this.order.indexOf(startAt) : -1;
+    }
   }
 
   // ---- writes -----------------------------------------------------------
 
   /** Replace the whole queue and start at `startIndex`. */
   setTracks(tracks: Track[], startIndex = 0, context = ''): void {
-    this.tracks = dedupe(tracks);
+    this.tracks = dedupe(tracks.map((track) => {
+      if (!track.isAutoSuggested) return track;
+      const { isAutoSuggested: _queueOnly, ...clean } = track;
+      return clean;
+    }));
     this.contextLabel = context;
+    this.contextTrackIds = new Set(this.tracks.filter((item) => item.id !== tracks[startIndex]?.id).map((item) => item.id));
 
     // A de-dupe may have shifted the intended start.
     const target = tracks[startIndex];
@@ -124,6 +163,14 @@ export class Queue {
   /** Append explicit items before any automatically suggested tail. Returns the number added. */
   add(tracks: Track | Track[]): number {
     const incoming = Array.isArray(tracks) ? tracks : [tracks];
+    // Explicitly queueing an automatic/context item promotes it to manual Up Next.
+    for (const track of incoming) {
+      if (track.isAutoSuggested) continue;
+      const existing = this.upcoming.find((item) => item.id === track.id);
+      if (existing && (existing.isAutoSuggested || this.contextTrackIds.has(track.id))) {
+        this.remove(track.id, { keepCurrent: true });
+      }
+    }
     const seen = new Set(this.tracks.map((t) => t.id));
     const fresh = incoming.filter((t) => {
       if (seen.has(t.id)) return false;
@@ -138,7 +185,10 @@ export class Queue {
     // keeping the order of successive swipes. Automatic batches remain last.
     const firstAuto = this.order.findIndex(
       (trackIndex, position) =>
-        position > this.position && this.tracks[trackIndex]?.isAutoSuggested
+        position > this.position && (
+          this.tracks[trackIndex]?.isAutoSuggested ||
+          this.contextTrackIds.has(this.tracks[trackIndex]?.id)
+        )
     );
     const insertAt = fresh.every((track) => track.isAutoSuggested) || firstAuto < 0
       ? this.order.length
@@ -183,6 +233,7 @@ export class Queue {
     // Remove ALL occurrences of this index from the play order.
     const orderPos = this.order.indexOf(trackIndex);
     this.tracks.splice(trackIndex, 1);
+    this.contextTrackIds.delete(trackId);
     this.order = this.order.filter((i) => i !== trackIndex);
     // Every index after the removed one shifts down by one.
     this.order = this.order.map((i) => (i > trackIndex ? i - 1 : i));
@@ -218,6 +269,7 @@ export class Queue {
     this.order = [];
     this.position = -1;
     this.contextLabel = '';
+    this.contextTrackIds.clear();
   }
 
   /** Clear everything except the track currently playing. */
@@ -230,6 +282,18 @@ export class Queue {
     this.tracks = [current];
     this.order = [0];
     this.position = 0;
+    this.contextTrackIds.clear();
+  }
+
+  /** Clear explicitly queued future tracks, preserving current and automatic continuation. */
+  clearManualUpcoming(): void {
+    for (const track of this.manualUpcoming) {
+      this.remove(track.id, { keepCurrent: true });
+    }
+  }
+
+  clearAutoUpcoming(): void {
+    for (const track of this.autoUpcoming) this.remove(track.id, { keepCurrent: true });
   }
 
   setShuffle(on: boolean): void {
@@ -343,11 +407,12 @@ export class Queue {
     }
 
     const rest = pinFirst === undefined ? indices : indices.filter((i) => i !== pinFirst);
-    const manual = rest.filter((i) => !this.tracks[i]?.isAutoSuggested);
+    const manual = rest.filter((i) => !this.tracks[i]?.isAutoSuggested && !this.contextTrackIds.has(this.tracks[i]?.id));
+    const context = rest.filter((i) => this.contextTrackIds.has(this.tracks[i]?.id));
     const automatic = rest.filter((i) => this.tracks[i]?.isAutoSuggested);
 
     // Shuffle within each group, never ahead of an explicitly queued track.
-    for (const group of [manual, automatic]) {
+    for (const group of [manual, context, automatic]) {
       for (let i = group.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [group[i], group[j]] = [group[j], group[i]];
@@ -355,8 +420,8 @@ export class Queue {
     }
 
     this.order = pinFirst === undefined
-      ? [...manual, ...automatic]
-      : [pinFirst, ...manual, ...automatic];
+      ? [...manual, ...context, ...automatic]
+      : [pinFirst, ...manual, ...context, ...automatic];
   }
 }
 

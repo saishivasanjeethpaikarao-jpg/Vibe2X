@@ -135,13 +135,13 @@ export default function SettingsScreen() {
           <View style={[styles.infoRow, styles.smartContinueRow]}>
             <View style={styles.smartContinueText}>
               <Text style={styles.rowValue}>Smart Continue</Text>
-              <Text style={styles.infoDescription}>Continue from your local library when playback ends</Text>
+              <Text style={styles.infoDescription}>Prepare related tracks while music plays, after your Up Next songs</Text>
             </View>
             <Switch
               value={settings.autoplayRelated}
               onValueChange={(value) => updateSettings({ autoplayRelated: value })}
               accessibilityLabel="Smart Continue"
-              accessibilityHint="Only starts after a completed track and an empty queue"
+              accessibilityHint="Adds related songs after your manual Up Next and playlist tracks"
             />
           </View>
         </View>

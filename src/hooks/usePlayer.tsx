@@ -19,13 +19,13 @@ import { endpointSource } from '../providers/stream/StreamResolver';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 import { getSuppressedTrackIds, getRecentTrackIds } from '../core/lie';
-import { chooseSmartContinue, mayStartSmartContinue } from '../playback/smartContinue';
+import { AutoContinueManager, RecommendationSignals } from '../playback/AutoContinueManager';
 
 type PlayerContextType = {
   // --- core player state used by every screen ---
   currentTrack: Track | null;
   isPlaying: boolean;
-  playTrack: (track: Track, context?: { tracks?: Track[]; label?: string }) => void;
+  playTrack: (track: Track, context?: { tracks?: Track[]; label?: string; candidates?: Track[]; query?: string }) => void;
   togglePlayPause: () => void;
 
   // --- everything the real player adds ---
@@ -40,6 +40,8 @@ type PlayerContextType = {
   setVolume: (v: number) => void;
   sleepTimerExpiration: number | null;
   setSleepTimer: (minutes: number | null) => void;
+  stopAtEndOfQueue: boolean;
+  setStopAtEndOfQueue: (enabled: boolean) => void;
   seekTo: (seconds: number) => void;
   /** Jump relative to the current position. Negative rewinds. */
   seekBy: (deltaSeconds: number) => void;
@@ -51,7 +53,12 @@ type PlayerContextType = {
 
   queue: Track[];
   upcoming: Track[];
+  manualUpcoming: Track[];
+  contextUpcoming: Track[];
+  autoUpcoming: Track[];
   queueContext: string;
+  isPreparingAuto: boolean;
+  pendingTrack: Track | null;
   addToQueue: (tracks: Track | Track[]) => boolean;
   playNext: (tracks: Track | Track[]) => void;
   removeFromQueue: (trackId: string) => void;
@@ -94,6 +101,16 @@ const ProgressContext = createContext<{ position: number; duration: number }>({
 
 export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const queueRef = useRef(new Queue());
+  const autoManager = useRef(new AutoContinueManager({
+    related: (track, signal) => MusicService.getRelated(track, signal),
+    search: async (query, signal) => (await MusicService.search(query, { signal, filter: 'Songs', limit: 20 })).tracks,
+    canPlay: (track) => MusicService.canPlay(track),
+  }));
+  const autoSession = useRef(0);
+  const autoFill = useRef<Promise<void> | null>(null);
+  const lastAutoEnabled = useRef<boolean | null>(null);
+  const sessionSkippedIds = useRef(new Set<string>());
+  const confirmedTrack = useRef<Track | null>(null);
 
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [status, setStatus] = useState<PlaybackStatus>(IDLE_STATUS);
@@ -108,12 +125,17 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const statusRef = useRef<PlaybackStatus>(IDLE_STATUS);
   statusRef.current = status;
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingTrack, setPendingTrack] = useState<Track | null>(null);
+  const transitioning = useRef(false);
+  const [isPreparingAuto, setIsPreparingAuto] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [queueVersion, setQueueVersion] = useState(0);
   const [volume, setVolumeState] = useState(1);
   const [sleepTimerExpiration, setSleepTimerExpiration] = useState<number | null>(null);
   const sleepTimerUntil = useRef<number | null>(null);
+  const stopAtEndRef = useRef(false);
+  const [stopAtEndOfQueue, setStopAtEndState] = useState(false);
 
   /** Cancels an in-flight load when the user starts another one. */
   const loadAbort = useRef<AbortController | null>(null);
@@ -133,11 +155,62 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const bumpQueue = useCallback(() => setQueueVersion((v) => v + 1), []);
 
-  // ---- persistence ------------------------------------------------------
-
   const persistQueue = useCallback(() => {
     writeJsonDebounced(STORAGE_KEYS.queue, queueRef.current.snapshot(), 600);
   }, []);
+
+  const signals = useCallback((recentIds = new Set<string>(), suppressedIds = new Set<string>()): RecommendationSignals => ({
+    liked: LibraryService.getLiked(),
+    history: LibraryService.getHistory(),
+    recentIds,
+    suppressedIds: new Set([...suppressedIds, ...sessionSkippedIds.current]),
+  }), []);
+
+  const fillAuto = useCallback((): Promise<void> => {
+    if (!LibraryService.getSettings().autoplayRelated || !queueRef.current.current || stopAtEndRef.current) return Promise.resolve();
+    if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return Promise.resolve();
+    const automaticCount = queueRef.current.autoUpcoming.length;
+    if (automaticCount >= 3) return Promise.resolve();
+    if (autoFill.current) return autoFill.current;
+    const session = autoSession.current;
+    setIsPreparingAuto(true);
+    const work = (async () => {
+      try {
+        const [recentIds, suppressedIds] = await Promise.all([getRecentTrackIds(12), getSuppressedTrackIds()]);
+        if (session !== autoSession.current) return;
+        const candidates = await autoManager.current.refill(
+          new Set(queueRef.current.items.map((track) => track.id)),
+          signals(recentIds, suppressedIds),
+          4 - queueRef.current.autoUpcoming.length
+        );
+        if (session !== autoSession.current || !LibraryService.getSettings().autoplayRelated || stopAtEndRef.current) return;
+        if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return;
+        if (queueRef.current.add(candidates)) {
+          bumpQueue();
+          persistQueue();
+          preloader.schedule(queueRef.current.peekNext());
+        }
+      } finally {
+        if (session === autoSession.current) setIsPreparingAuto(false);
+      }
+    })().catch(() => undefined).finally(() => { if (autoFill.current === work) autoFill.current = null; });
+    autoFill.current = work;
+    return work;
+  }, [bumpQueue, persistQueue, signals]);
+
+  useEffect(() => LibraryService.subscribe(() => {
+    const enabled = LibraryService.getSettings().autoplayRelated;
+    if (lastAutoEnabled.current === enabled) return;
+    lastAutoEnabled.current = enabled;
+    if (!enabled) {
+      autoManager.current.cancel();
+      autoFill.current = null;
+      queueRef.current.clearAutoUpcoming();
+      bumpQueue();
+      persistQueue();
+      preloader.schedule(queueRef.current.peekNext());
+    } else void fillAuto();
+  }), [bumpQueue, fillAuto, persistQueue]);
 
   // ---- loading a track --------------------------------------------------
 
@@ -145,6 +218,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     async (options: { autoPlay?: boolean; startPosition?: number } = {}) => {
       const track = queueRef.current.current;
       if (!track) {
+        transitioning.current = false;
         setCurrentTrack(null);
         setIsLoading(false);
         playbackEngine.stop();
@@ -152,6 +226,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       }
 
       const id = ++loadId.current;
+      transitioning.current = true;
 
       // Only abort the previous load if it was for a DIFFERENT track. Aborting
       // a load of this same track would kill the shared in-flight resolve that
@@ -165,7 +240,6 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       loadingTrackId.current = track.id;
 
       const preloadedThis = preloader.pending === track.id;
-      historyWrittenFor.current = null;
 
       // Stop warming anything that is no longer next -- but if we were warming
       // THIS track, adopt that request instead of aborting it: resolveStream
@@ -176,7 +250,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         console.log('[playback] load', track.title, '| preloaded:', preloadedThis);
       }
 
-      setCurrentTrack(track);
+      // Keep the confirmed native track visible while the next stream resolves.
+      playbackEngine.pause();
+      setStatus((previous) => ({ ...previous, isPlaying: false, isBuffering: true }));
+      setPendingTrack(track);
       setError(null);
       setIsLoading(true);
       lastAttempt.current = { track, position: options.startPosition ?? 0 };
@@ -185,22 +262,38 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const stream = await MusicService.resolveStream(track, controller.signal);
         if (id !== loadId.current) return; // superseded by a newer load
 
-        await playbackEngine.load(track, stream, options);
+        await playbackEngine.load(track, stream, { ...options, isCurrent: () => id === loadId.current });
         if (id !== loadId.current) return;
 
+        setCurrentTrack(track);
+        confirmedTrack.current = track;
+        transitioning.current = false;
+        setStatus(playbackEngine.getStatus());
+        historyWrittenFor.current = null;
+        setPendingTrack(null);
         setIsLoading(false);
         autoSkips.current = 0;
         loadingTrackId.current = null;
         if (__DEV__) console.log('[playback] started', track.title);
         LibraryService.recordPlay(track);
 
+        if (autoManager.current.seedId !== track.id) {
+          autoSession.current++;
+          autoFill.current = null;
+          autoManager.current.start(track, queueRef.current.upcoming.filter((item) => item.isAutoSuggested));
+        }
+
         // Warm exactly one track ahead, so pressing skip is instant.
         preloader.schedule(queueRef.current.peekNext());
+        void fillAuto();
       } catch (e) {
         if (id !== loadId.current) return;
 
         // Always leave the loading state, whatever went wrong.
+        transitioning.current = false;
+        setStatus({ ...playbackEngine.getStatus(), isBuffering: false, isPlaying: false });
         setIsLoading(false);
+        setPendingTrack(null);
         loadingTrackId.current = null;
         const err = toAppError(e, 'playback_failed');
         if (__DEV__) console.log('[playback] FAILED', track.title, '|', err.kind, '|', err.detail ?? '');
@@ -231,15 +324,19 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setError(messageFor(err));
       }
     },
-    [bumpQueue, persistQueue]
+    [bumpQueue, persistQueue, fillAuto]
   );
 
   // ---- engine wiring ----------------------------------------------------
 
   useEffect(() => {
-    playbackEngine.on('onStatus', (s) => setStatus(s));
+    playbackEngine.on('onStatus', (s) => {
+      statusRef.current = s;
+      if (!transitioning.current) setStatus(s);
+    });
 
     playbackEngine.on('onComplete', () => {
+      if (transitioning.current) return;
       if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return;
       // `auto` so repeat-one replays rather than advances.
       const nextTrack = queueRef.current.next(true);
@@ -247,15 +344,24 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       persistQueue();
 
       if (!nextTrack) {
-        // The only automatic continuation path: a completed current track
-        // with no explicit upcoming item. Manual Next never starts it.
-        void continueFromLocalLibrary();
+        const completedId = queueRef.current.current?.id;
+        const session = autoSession.current;
+        void fillAuto().then(() => {
+          if (session !== autoSession.current || queueRef.current.current?.id !== completedId) return;
+          if (stopAtEndRef.current || (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current)) return;
+          if (queueRef.current.next(true)) {
+            bumpQueue();
+            persistQueue();
+            void loadCurrent({ autoPlay: true });
+          }
+        });
         return;
       }
       void loadCurrent({ autoPlay: true });
     });
 
     playbackEngine.on('onError', (e) => {
+      if (transitioning.current) return;
       setIsLoading(false);
       setError(messageFor(e instanceof AppError ? e : toAppError(e, 'playback_failed')));
     });
@@ -266,61 +372,6 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const continueFromLocalLibrary = useCallback(async () => {
-    const settings = LibraryService.getSettings();
-    const last = queueRef.current.current;
-
-    if (!last || !mayStartSmartContinue({
-      trackCompleted: true,
-      hasUpcoming: queueRef.current.upcoming.length > 0,
-      enabled: settings.autoplayRelated,
-      sleepTimerExpired: Boolean(sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current),
-    })) return;
-
-    // Capture the current load so we can bail if the user picks new music
-    // while the network request is in flight.
-    const id = loadId.current;
-
-    try {
-      const [suppressed, recent] = await Promise.all([
-        getSuppressedTrackIds(),
-        getRecentTrackIds(12),
-      ]);
-
-      if (loadId.current !== id || queueRef.current.current?.id !== last.id) return;
-      if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return;
-      if (queueRef.current.upcoming.length) {
-        queueRef.current.next(false);
-        bumpQueue();
-        persistQueue();
-        void loadCurrent({ autoPlay: true });
-        return;
-      }
-
-      const excluded = new Set([
-        ...queueRef.current.items.map((track) => track.id),
-        ...suppressed,
-        ...recent,
-      ]);
-      const fresh = chooseSmartContinue(
-        last,
-        LibraryService.getHistory(),
-        LibraryService.getLiked(),
-        excluded
-      );
-      if (!fresh.length) return;
-
-      queueRef.current.add(fresh);
-      const nextTrack = queueRef.current.next(false);
-      bumpQueue();
-      persistQueue();
-
-      if (nextTrack) void loadCurrent({ autoPlay: true });
-    } catch {
-      // Smart Continue is optional; a local-history failure ends playback.
-    }
-  }, [bumpQueue, loadCurrent, persistQueue]);
 
   // ---- startup: restore library, settings, queue and position -----------
 
@@ -333,6 +384,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (cancelled) return;
 
         const settings = LibraryService.getSettings();
+        lastAutoEnabled.current = settings.autoplayRelated;
         endpointSource.setEndpoints(settings.resolverEndpoints);
 
         playbackEngine.setVolume(settings.volume);
@@ -354,6 +406,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             if (cancelled) return;
 
             setCurrentTrack(restored);
+            confirmedTrack.current = restored;
             lastAttempt.current = {
               track: restored,
               position: saved.trackId === restored.id ? saved.position : 0,
@@ -380,7 +433,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const positionSecond = Math.floor(status.position);
 
   useEffect(() => {
-    if (!currentTrack) return;
+    if (!currentTrack || playbackEngine.trackId !== currentTrack.id || !status.isPlaying) return;
     LibraryService.savePlayback(currentTrack.id, positionSecond);
 
     // A listen is logged once, mid-playback, not on tap and not on finish --
@@ -425,7 +478,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // ---- actions ----------------------------------------------------------
 
   const playTrack = useCallback(
-    (track: Track, context?: { tracks?: Track[]; label?: string }) => {
+    (track: Track, context?: { tracks?: Track[]; label?: string; candidates?: Track[]; query?: string }) => {
+      autoSession.current++;
+      autoFill.current = null;
+      autoManager.current.start(track, context?.candidates, context?.query);
       const list = context?.tracks?.length ? context.tracks : [track];
       const startIndex = Math.max(
         0,
@@ -433,12 +489,18 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       );
 
       queueRef.current.setTracks(list, startIndex, context?.label ?? '');
+      if (LibraryService.getSettings().autoplayRelated && !stopAtEndRef.current) {
+        queueRef.current.add(autoManager.current.immediate(
+          new Set(queueRef.current.items.map((item) => item.id)), signals()
+        ));
+      }
       bumpQueue();
       persistQueue();
 
       void loadCurrent({ autoPlay: true });
+      void fillAuto();
     },
-    [bumpQueue, loadCurrent, persistQueue]
+    [bumpQueue, fillAuto, loadCurrent, persistQueue, signals]
   );
 
   const togglePlayPause = useCallback(() => {
@@ -462,14 +524,20 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     else playbackEngine.play();
   }, [bumpQueue, currentTrack, loadCurrent, status.isPlaying]);
 
-  const next = useCallback(() => {
+  const next = useCallback(async () => {
+    if (!transitioning.current && statusRef.current.isPlaying && statusRef.current.position > 0 && statusRef.current.position < 10 && confirmedTrack.current) {
+      sessionSkippedIds.current.add(confirmedTrack.current.id);
+    }
+    const session = autoSession.current;
+    if (!queueRef.current.peekNext() && !queueRef.current.hasNext) await fillAuto();
+    if (session !== autoSession.current) return;
     const nextTrack = queueRef.current.next(false);
     bumpQueue();
     persistQueue();
 
     if (!nextTrack) return;
     void loadCurrent({ autoPlay: true });
-  }, [bumpQueue, loadCurrent, persistQueue]);
+  }, [bumpQueue, fillAuto, loadCurrent, persistQueue]);
 
   const previous = useCallback(() => {
     // Standard behaviour: restart the track if we are more than 3s in.
@@ -517,9 +585,26 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, []);
 
   const setSleepTimer = useCallback((minutes: number | null) => {
+    const wasStopping = stopAtEndRef.current;
     sleepTimerUntil.current = minutes === null ? null : Date.now() + minutes * 60000;
+    stopAtEndRef.current = false;
+    setStopAtEndState(false);
     playbackEngine.setSleepTimer(minutes);
-  }, []);
+    if (wasStopping) void fillAuto();
+  }, [fillAuto]);
+
+  const setStopAtEndOfQueue = useCallback((enabled: boolean) => {
+    stopAtEndRef.current = enabled;
+    setStopAtEndState(enabled);
+    if (enabled) {
+      autoManager.current.cancel();
+      autoFill.current = null;
+      queueRef.current.clearAutoUpcoming();
+      bumpQueue();
+      persistQueue();
+      preloader.schedule(queueRef.current.peekNext());
+    } else void fillAuto();
+  }, [bumpQueue, fillAuto, persistQueue]);
 
   const retry = useCallback(() => {
     const attempt = lastAttempt.current;
@@ -537,12 +622,16 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const addToQueue = useCallback(
     (tracks: Track | Track[]) => {
       const wasEmpty = queueRef.current.length === 0;
-      const added = queueRef.current.add(tracks);
+      const manual = (Array.isArray(tracks) ? tracks : [tracks]).map((track) =>
+        track.isAutoSuggested ? { ...track, isAutoSuggested: false } : track
+      );
+      const added = queueRef.current.add(manual);
       if (!added) return false;
       bumpQueue();
       persistQueue();
 
       if (wasEmpty) void loadCurrent({ autoPlay: true });
+      else preloader.schedule(queueRef.current.peekNext());
       return true;
     },
     [bumpQueue, loadCurrent, persistQueue]
@@ -551,7 +640,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const playNextInQueue = useCallback(
     (tracks: Track | Track[]) => {
       const wasEmpty = queueRef.current.length === 0;
-      queueRef.current.playNext(tracks);
+      const manual = (Array.isArray(tracks) ? tracks : [tracks]).map((track) =>
+        track.isAutoSuggested ? { ...track, isAutoSuggested: false } : track
+      );
+      queueRef.current.playNext(manual);
       bumpQueue();
       persistQueue();
 
@@ -595,9 +687,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   );
 
   const clearQueue = useCallback(() => {
-    queueRef.current.clearUpcoming();
+    queueRef.current.clearManualUpcoming();
     bumpQueue();
     persistQueue();
+    preloader.schedule(queueRef.current.peekNext());
   }, [bumpQueue, persistQueue]);
 
   const jumpTo = useCallback(
@@ -631,7 +724,12 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     () => ({
       items: queueRef.current.items,
       upcoming: queueRef.current.upcoming,
+      manualUpcoming: queueRef.current.manualUpcoming,
+      contextUpcoming: queueRef.current.contextUpcoming,
+      autoUpcoming: queueRef.current.autoUpcoming,
       context: queueRef.current.context,
+      isPreparingAuto,
+      pendingTrack,
       shuffle: queueRef.current.shuffle,
       repeat: queueRef.current.repeat,
       hasNext: queueRef.current.hasNext,
@@ -639,7 +737,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }),
     // queueVersion is the explicit invalidation signal for the mutable Queue.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [queueVersion]
+    [queueVersion, isPreparingAuto, pendingTrack]
   );
 
   // Prefer the source-reported duration, falling back to provider metadata
@@ -664,6 +762,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       setVolume,
       sleepTimerExpiration: status.sleepTimerExpiration || null,
       setSleepTimer,
+      stopAtEndOfQueue,
+      setStopAtEndOfQueue,
       seekTo,
       seekBy,
 
@@ -674,7 +774,12 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
       queue: queueSnapshot.items,
       upcoming: queueSnapshot.upcoming,
+      manualUpcoming: queueSnapshot.manualUpcoming,
+      contextUpcoming: queueSnapshot.contextUpcoming,
+      autoUpcoming: queueSnapshot.autoUpcoming,
       queueContext: queueSnapshot.context,
+      isPreparingAuto: queueSnapshot.isPreparingAuto,
+      pendingTrack: queueSnapshot.pendingTrack,
       addToQueue,
       playNext: playNextInQueue,
       removeFromQueue,
@@ -705,6 +810,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       setVolume,
       status.sleepTimerExpiration,
       setSleepTimer,
+      stopAtEndOfQueue,
+      setStopAtEndOfQueue,
       seekTo,
       seekBy,
       next,

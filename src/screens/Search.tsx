@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-import { Search as SearchIcon, X } from 'lucide-react-native';
+import { Search as SearchIcon, X, Clock3 } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS, THEME, TYPE } from '../constants/theme';
 import { Pill } from '../components/common/Pill';
 import { GlassCard } from '../components/common/GlassCard';
@@ -25,6 +25,7 @@ import { SearchFilter, Track } from '../core/types';
 import { useSearch } from '../hooks/useSearch';
 import { usePlayer } from '../hooks/usePlayer';
 import { MusicService } from '../services/MusicService';
+import { LibraryService } from '../services/LibraryService';
 import { singleSearchTrackContext } from './searchPlayback';
 import { useNavigation } from '@react-navigation/native';
 
@@ -59,6 +60,15 @@ export default function SearchScreen() {
   const { playTrack, currentTrack, isPlaying, togglePlayPause, next, addToQueue } = usePlayer();
   const [expandingId, setExpandingId] = useState<string | null>(null);
   const [isFocused, setIsFocused] = useState(false);
+  const [recentQueries, setRecentQueries] = useState<string[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    const sync = () => { if (active) setRecentQueries(LibraryService.getSearchHistory()); };
+    const unsubscribe = LibraryService.subscribe(sync);
+    void LibraryService.load().then(sync).catch(() => undefined);
+    return () => { active = false; unsubscribe(); };
+  }, []);
 
   const isBrowsing = query.trim().length === 0;
 
@@ -67,9 +77,13 @@ export default function SearchScreen() {
     (track: Track) => {
       // The result has been chosen; the user is done typing.
       Keyboard.dismiss();
-      playTrack(track, singleSearchTrackContext(track, results.query));
+      playTrack(track, {
+        ...singleSearchTrackContext(track, results.query),
+        candidates: results.tracks.filter((item) => item.id !== track.id),
+        query: results.query,
+      });
     },
-    [playTrack, results.query]
+    [playTrack, results.query, results.tracks]
   );
 
   /** Tapping an album/playlist expands it and plays it as a queue. */
@@ -250,6 +264,27 @@ export default function SearchScreen() {
 
             {isBrowsing ? (
               <>
+                {recentQueries.length > 0 && (
+                  <View>
+                    <View style={styles.recentHeading}>
+                      <Text style={styles.sectionTitle}>Recent searches</Text>
+                      <TouchableOpacity onPress={() => LibraryService.clearSearchHistory()} accessibilityRole="button" accessibilityLabel="Clear Search History">
+                        <Text style={styles.recentClear}>Clear Search History</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {recentQueries.map((recent) => (
+                      <View key={recent.toLocaleLowerCase()} style={styles.recentRow}>
+                        <TouchableOpacity style={styles.recentQuery} onPress={() => searchNow(recent)} accessibilityRole="button" accessibilityLabel={`Search again for ${recent}`}>
+                          <Clock3 color={COLORS.text.secondary} size={18} />
+                          <Text style={styles.recentText} numberOfLines={1}>{recent}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.clearButton} onPress={() => LibraryService.removeSearchHistory(recent)} accessibilityRole="button" accessibilityLabel={`Remove ${recent} from search history`}>
+                          <X color={COLORS.text.secondary} size={18} />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
                 <Text style={styles.sectionTitle}>Browse Vibe2X</Text>
                 <View style={styles.categoriesGrid}>
                   {BROWSE_CATEGORIES.map((category) => (
@@ -356,6 +391,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: THEME.background.primary,
   },
+  recentHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  recentClear: { color: COLORS.text.secondary, fontSize: 12 },
+  recentRow: { flexDirection: 'row', alignItems: 'center', minHeight: 48 },
+  recentQuery: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: SIZES.sm, minHeight: 48 },
+  recentText: { flex: 1, color: COLORS.text.primary, fontSize: 15 },
   scrollContent: {
     paddingHorizontal: SIZES.md,
   },

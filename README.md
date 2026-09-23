@@ -15,19 +15,20 @@ An open-source, local-first mobile music player.
 
 Vibe2X is under active development. Version `0.1.0` is configured as the first public version, but tag `v0.1.0` and an official release have **not** been created. Generated native projects, signing keys, and release binaries are intentionally not tracked.
 
+Release blocker: the current `expo-audio` native media session exposes seek-back/seek-forward rather than Previous/Next track commands. In-app Previous/Next exists, but Android notification/lock-screen and iOS Control Center transport parity is not verified or complete. Do not treat a successful build as approval to publish.
+
 | Mobile platform | Current status |
 | --- | --- |
-| Android | **Alpha — GitHub Release**. Standalone signed APK available in GitHub Releases. |
-| iOS | **Build verification**. Unsigned simulator build verified in CI; TestFlight Alpha distribution is configured and pending manual Apple Developer authentication. |
+| Android | **Device QA candidate**. A standalone QA APK is built by GitHub Actions; playback and system-control defects are under retest. No official `v0.1.0` release exists. |
+| iOS | **Simulator build verification only**. Online playback on a fresh install is blocked without a configured resolver endpoint; signed iPhone and TestFlight runtime behavior are unverified. |
 
 ## Download & Installation
 
-**Android**
-- [Download Vibe2X APK from GitHub Releases](https://github.com/saishivasanjeethpaikarao-jpg/Vibe2X/releases)
-- Download the `.apk` file, transfer it to your Android device, and install it.
+**Android QA**
+- Download the `Vibe2X-LiquidVibe-QA.apk` artifact from a successful [Android standalone QA workflow run](https://github.com/saishivasanjeethpaikarao-jpg/Vibe2X/actions/workflows/android-qa.yml). It is QA-signed and is not the official release.
 
 **iOS**
-- iOS distribution uses Apple TestFlight. Access for approved testers will be provided once the app passes Apple review and TestFlight processing.
+- No physical-iPhone build or TestFlight candidate is currently verified. The simulator CI build is not installable on an iPhone.
 
 ## Available now
 
@@ -42,7 +43,7 @@ The following capabilities are implemented in the current source:
 - Liked tracks, local playlists, imported provider playlists, pinning, renaming, and deletion.
 - On-device audio scanning through Android MediaLibrary permissions.
 - Recently played items, listening history, search history, and persisted playback position.
-- Local Smart Continue candidate selection from listening history and liked tracks, subject to recent-play and suppression exclusions. Runtime behavior is awaiting device retest.
+- Shared Auto Continue candidate selection from the current song, search context, provider-related results, likes, and listening history, subject to recent-play and suppression exclusions. Runtime behavior is awaiting device retest.
 - Local profile/settings storage and JSON library-backup export.
 
 These are source-level capabilities, not a claim that every device, Android version, provider response, or network condition has been tested. See [Verification status](#verification-status).
@@ -133,7 +134,7 @@ The [iOS build workflow](.github/workflows/ios-build.yml) runs on GitHub macOS C
 
 ### Release identity and signing
 
-Both application identifiers are configured as `com.vibe2x.app`. Expo version is `0.1.0`, Android `versionCode` is `1`, and iOS `buildNumber` is `1`. Increase the platform build numbers for future distributed builds. Store availability and ownership of the identifier are not yet verified.
+Both application identifiers are configured as `io.github.saishivasanjeethpaikarao.vibe2x`. Expo version is `0.1.0`, Android `versionCode` is `1`, and iOS `buildNumber` is `1`. Increase the platform build numbers for future distributed builds. Store availability and ownership of the identifier are not yet verified.
 
 The new Android identifier installs separately from earlier `com.sanyamjain04.NOTE` QA builds and does not inherit their local data. Export a backup before removing an old QA installation. Keep only the intended Vibe2X build installed when testing custom-scheme links, because old and new builds can both register the same schemes.
 
@@ -141,10 +142,10 @@ The [Android release workflow](.github/workflows/android-release.yml) runs only 
 
 | Secret | Purpose |
 | --- | --- |
-| `VIBE2X_ANDROID_KEYSTORE_BASE64` | Base64-encoded bytes of the persistent Android release keystore; base64 is not encryption. |
-| `VIBE2X_ANDROID_KEYSTORE_PASSWORD` | Keystore password. |
-| `VIBE2X_ANDROID_KEY_ALIAS` | Signing-key alias. |
-| `VIBE2X_ANDROID_KEY_PASSWORD` | Key password. |
+| `VIBE2X_KEYSTORE_BASE64` | Base64-encoded bytes of the persistent Android release keystore; base64 is not encryption. |
+| `VIBE2X_KEYSTORE_PASSWORD` | Keystore password. |
+| `VIBE2X_KEY_ALIAS` | Signing-key alias. |
+| `VIBE2X_KEY_PASSWORD` | Key password. |
 
 Keep the original keystore backed up securely: Android updates must use the appropriate established signing identity. The workflow fails without these secrets and never substitutes an ephemeral QA or Android debug key. It uploads a verified APK as a workflow artifact and creates a GitHub Release with that APK only after the tag build succeeds. No keystore or password belongs in Git or the APK.
 
