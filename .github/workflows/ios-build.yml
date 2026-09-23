@@ -1,0 +1,105 @@
+name: iOS simulator build verification
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - ui/liquid-vibe
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  ios-simulator:
+    name: Build unsigned iOS simulator app
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      CI: '1'
+      LANG: en_US.UTF-8
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+          cache: npm
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests and static checks
+        run: |
+          npm test -- --reporter=dot
+          npx tsc --noEmit
+          npx expo install --check
+
+      - name: Generate clean iOS project
+        run: npx expo prebuild --platform ios --clean --no-install
+
+      - name: Install CocoaPods
+        working-directory: ios
+        run: pod install --repo-update
+
+      - name: Build simulator app without signing
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace ios/Vibe2X.xcworkspace \
+            -scheme Vibe2X \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/vibe2x-ios-build" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Verify simulator artifact and bundle identifier
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/vibe2x-ios-build/Build/Products/Release-iphonesimulator/Vibe2X.app"
+          test -d "$app"
+          APP_PATH="$app" python3 <<'PY'
+          import json, os, plistlib
+          with open('app.json') as source:
+              config = json.load(source)['expo']
+          with open(os.path.join(os.environ['APP_PATH'], 'Info.plist'), 'rb') as source:
+              info = plistlib.load(source)
+          assert info['CFBundleIdentifier'] == config['ios']['bundleIdentifier'] == 'com.vibe2x.app'
+          assert info['CFBundleShortVersionString'] == config['version']
+          assert info['CFBundleVersion'] == config['ios']['buildNumber']
+          schemes = {scheme for item in info.get('CFBundleURLTypes', []) for scheme in item.get('CFBundleURLSchemes', [])}
+          assert {'vibe2x', 'vibe2x-spotify'} <= schemes, schemes
+          PY
+          test -s "$app/main.jsbundle"
+          version="$(node -p "require('./app.json').expo.version")"
+          mkdir -p dist/ios
+          archive="dist/ios/Vibe2X-$version-ios-simulator.zip"
+          ditto -c -k --keepParent "$app" "$archive"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "iOS simulator app built without signing: com.vibe2x.app ($version)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Native deep-link and OAuth schemes registered; authentication round trip not tested." >> "$GITHUB_STEP_SUMMARY"
+          echo "Physical iPhone installation and playback are not verified." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload iOS simulator build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vibe2X-${{ steps.verify.outputs.version }}-ios-simulator
+          path: ${{ steps.verify.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 14

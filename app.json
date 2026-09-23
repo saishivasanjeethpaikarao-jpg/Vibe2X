@@ -2,7 +2,8 @@
   "expo": {
     "name": "Vibe2X",
     "slug": "vibe2x",
-    "version": "1.0.0",
+    "platforms": ["android", "ios"],
+    "version": "0.1.0",
     "orientation": "portrait",
     "scheme": [
       "vibe2x",
@@ -11,6 +12,8 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
+      "bundleIdentifier": "com.vibe2x.app",
+      "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
         "UIBackgroundModes": [
@@ -19,6 +22,7 @@
       }
     },
     "android": {
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -34,10 +38,7 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "package": "com.sanyamjain04.NOTE"
-    },
-    "web": {
-      "favicon": "./assets/icon.png"
+      "package": "com.vibe2x.app"
     },
     "plugins": [
       "expo-font",

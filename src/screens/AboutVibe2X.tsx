@@ -5,13 +5,14 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react-native';
 import { FONTS, SIZES, THEME } from '../constants/theme';
+import { version as sourceVersion } from '../../package.json';
 
 const REPO_URL = 'https://github.com/saishivasanjeethpaikarao-jpg/Vibe2X';
 
 export default function AboutVibe2XScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const version = Constants.expoConfig?.version ?? '1.0.0';
+  const version = Constants.expoConfig?.version ?? sourceVersion;
 
   return (
     <View style={styles.root}>

@@ -62,39 +62,8 @@ jobs:
           done
           exit 1
 
-      - name: Generate clean Android project and ephemeral QA key
-        shell: bash
-        run: |
-          set -euo pipefail
-          qa_password="$(openssl rand -hex 16)"
-          echo "::add-mask::$qa_password"
-
-          mkdir -p credentials
-          keytool -genkeypair \
-            -storetype PKCS12 \
-            -keystore credentials/liquid-vibe-qa.keystore \
-            -storepass "$qa_password" \
-            -keypass "$qa_password" \
-            -alias liquid-vibe-qa \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 30 \
-            -dname "CN=Vibe2X Liquid Vibe QA, OU=QA, O=Vibe2X, C=XX"
-
-          QA_STORE_PASSWORD="$qa_password" node <<'NODE'
-          const fs = require('fs');
-          fs.writeFileSync(
-            'credentials/keystore.json',
-            JSON.stringify({
-              keystorePath: 'credentials/liquid-vibe-qa.keystore',
-              storePassword: process.env.QA_STORE_PASSWORD,
-              keyAlias: 'liquid-vibe-qa',
-              keyPassword: process.env.QA_STORE_PASSWORD,
-            })
-          );
-          NODE
-
-          npx expo prebuild --platform android --clean --no-install
+      - name: Generate clean Android project
+        run: npx expo prebuild --platform android --clean --no-install
 
       - name: Assemble embedded release-style QA APK
         working-directory: android
@@ -104,12 +73,40 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon --stacktrace :app:assembleRelease
 
-      - name: Remove ephemeral signing material
-        if: always()
+      - name: Sign standalone APK with ephemeral QA key
         shell: bash
         run: |
-          rm -rf credentials
-          rm -f android/app/release.keystore
+          set -euo pipefail
+          qa_password="$(openssl rand -hex 16)"
+          echo "::add-mask::$qa_password"
+          export QA_STORE_PASSWORD="$qa_password"
+          keystore="$RUNNER_TEMP/liquid-vibe-qa.keystore"
+          trap 'rm -f "$keystore" "$RUNNER_TEMP/vibe2x-qa-aligned.apk"' EXIT
+          keytool -genkeypair \
+            -storetype PKCS12 \
+            -keystore "$keystore" \
+            -storepass:env QA_STORE_PASSWORD \
+            -keypass:env QA_STORE_PASSWORD \
+            -alias liquid-vibe-qa \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 30 \
+            -dname "CN=Vibe2X Liquid Vibe QA, OU=QA, O=Vibe2X, C=XX"
+
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          zipalign="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          test -x "$zipalign"
+          unsigned_apk='android/app/build/outputs/apk/release/app-release-unsigned.apk'
+          test -s "$unsigned_apk"
+          "$zipalign" -P 16 -f 4 "$unsigned_apk" "$RUNNER_TEMP/vibe2x-qa-aligned.apk"
+          "$apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias liquid-vibe-qa \
+            --ks-pass env:QA_STORE_PASSWORD \
+            --key-pass env:QA_STORE_PASSWORD \
+            --out android/app/build/outputs/apk/release/app-release.apk \
+            "$RUNNER_TEMP/vibe2x-qa-aligned.apk"
 
       - name: Verify and stage standalone APK
         id: verify
@@ -131,14 +128,19 @@ jobs:
 
           "$apksigner" verify --verbose --print-certs "$output_apk"
           "$aapt" dump badging "$output_apk" > /tmp/vibe2x-badging.txt
-          grep -F "package: name='com.sanyamjain04.NOTE'" /tmp/vibe2x-badging.txt
-          grep -F "launchable-activity: name='com.sanyamjain04.NOTE.MainActivity'" /tmp/vibe2x-badging.txt
+          grep -F "package: name='com.vibe2x.app'" /tmp/vibe2x-badging.txt
+          grep -F "launchable-activity: name='com.vibe2x.app.MainActivity'" /tmp/vibe2x-badging.txt
+          version="$(node -p "require('./app.json').expo.version")"
+          version_code="$(node -p "require('./app.json').expo.android.versionCode")"
+          grep -F "versionCode='$version_code' versionName='$version'" /tmp/vibe2x-badging.txt
           if grep -q '^application-debuggable' /tmp/vibe2x-badging.txt; then
             echo "QA APK is unexpectedly debuggable" >&2
             exit 1
           fi
 
           "$aapt" dump xmltree "$output_apk" AndroidManifest.xml > /tmp/vibe2x-manifest.txt
+          grep -F '"vibe2x"' /tmp/vibe2x-manifest.txt
+          grep -F '"vibe2x-spotify"' /tmp/vibe2x-manifest.txt
           if grep -q 'DevLauncherActivity' /tmp/vibe2x-manifest.txt; then
             echo "Expo development launcher activity is present" >&2
             exit 1

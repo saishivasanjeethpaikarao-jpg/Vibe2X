@@ -1,0 +1,210 @@
+name: Android signed release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Verify release tag and source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tag and main history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Expected a stable vX.Y.Z tag' >&2; exit 1; }
+          git fetch origin main
+          git merge-base --is-ancestor HEAD origin/main || { echo 'Release tag must point to a commit on main' >&2; exit 1; }
+          node - "$tag" <<'NODE'
+          const fs = require('fs');
+          const tag = process.argv[2];
+          const app = JSON.parse(fs.readFileSync('app.json', 'utf8')).expo;
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          if (tag !== `v${app.version}` || pkg.version !== app.version || lock.version !== app.version || lock.packages[''].version !== app.version) {
+            throw new Error('Git tag, Expo version, package.json, and package-lock.json must agree');
+          }
+          if (app.android.package !== 'com.vibe2x.app' || app.ios.bundleIdentifier !== 'com.vibe2x.app') {
+            throw new Error('Vibe2X application identifiers do not match release configuration');
+          }
+          if (!Number.isInteger(app.android.versionCode) || app.android.versionCode < 1 || !/^\d+$/.test(app.ios.buildNumber)) {
+            throw new Error('Android versionCode and iOS buildNumber must be set');
+          }
+          NODE
+
+  ios-verification:
+    name: Verify iOS simulator build before publication
+    needs: preflight
+    uses: ./.github/workflows/ios-build.yml
+
+  android-release:
+    name: Build and publish signed Android APK
+    needs: [preflight, ios-verification]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+          cache: npm
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests and static checks
+        run: |
+          npm test -- --reporter=dot
+          npx tsc --noEmit
+          npx expo install --check
+
+      - name: Generate clean Android project
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Assemble standalone release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace :app:assembleRelease
+
+      - name: Sign APK with persistent release key
+        shell: bash
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.VIBE2X_ANDROID_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.VIBE2X_ANDROID_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.VIBE2X_ANDROID_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.VIBE2X_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in RELEASE_KEYSTORE_BASE64 RELEASE_STORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required Android signing secret: $name" >&2
+              exit 1
+            fi
+          done
+          unsigned_apk='android/app/build/outputs/apk/release/app-release-unsigned.apk'
+          test -s "$unsigned_apk"
+          keystore="$RUNNER_TEMP/vibe2x-release.keystore"
+          trap 'rm -f "$keystore"' EXIT
+          umask 077
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          zipalign="$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          test -x "$zipalign"
+          mkdir -p dist/release
+          "$zipalign" -P 16 -f 4 "$unsigned_apk" "$RUNNER_TEMP/vibe2x-aligned.apk"
+          "$apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$RELEASE_KEY_ALIAS" \
+            --ks-pass env:RELEASE_STORE_PASSWORD \
+            --key-pass env:RELEASE_KEY_PASSWORD \
+            --out "dist/release/Vibe2X-${GITHUB_REF_NAME}-Android.apk" \
+            "$RUNNER_TEMP/vibe2x-aligned.apk"
+
+      - name: Verify signed APK and embedded Hermes bundle
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_apk="dist/release/Vibe2X-${GITHUB_REF_NAME}-Android.apk"
+          test -s "$release_apk"
+
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          aapt="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$apksigner"
+          test -x "$aapt"
+          "$apksigner" verify --verbose --print-certs "$release_apk"
+          "$aapt" dump badging "$release_apk" > "$RUNNER_TEMP/vibe2x-badging.txt"
+          grep -F "package: name='com.vibe2x.app'" "$RUNNER_TEMP/vibe2x-badging.txt"
+          grep -F "launchable-activity: name='com.vibe2x.app.MainActivity'" "$RUNNER_TEMP/vibe2x-badging.txt"
+          version="$(node -p "require('./app.json').expo.version")"
+          version_code="$(node -p "require('./app.json').expo.android.versionCode")"
+          grep -F "versionCode='$version_code' versionName='$version'" "$RUNNER_TEMP/vibe2x-badging.txt"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/vibe2x-badging.txt"; then
+            echo 'Release APK is unexpectedly debuggable' >&2
+            exit 1
+          fi
+          "$aapt" dump xmltree "$release_apk" AndroidManifest.xml > "$RUNNER_TEMP/vibe2x-manifest.txt"
+          grep -F '"vibe2x"' "$RUNNER_TEMP/vibe2x-manifest.txt"
+          grep -F '"vibe2x-spotify"' "$RUNNER_TEMP/vibe2x-manifest.txt"
+          if grep -q 'DevLauncherActivity' "$RUNNER_TEMP/vibe2x-manifest.txt"; then
+            echo 'Expo development launcher is present in release APK' >&2
+            exit 1
+          fi
+          unzip -l "$release_apk" > "$RUNNER_TEMP/vibe2x-apk-entries.txt"
+          grep -Eq 'assets/index\.android\.bundle$' "$RUNNER_TEMP/vibe2x-apk-entries.txt"
+          unzip -p "$release_apk" assets/index.android.bundle > "$RUNNER_TEMP/index.android.bundle"
+          magic="$(od -An -tx1 -N8 "$RUNNER_TEMP/index.android.bundle" | tr -d ' \n')"
+          test "$magic" = 'c61fbc03c103191f' || { echo 'Expected embedded Hermes bytecode' >&2; exit 1; }
+          if grep -Eiq '(^|/)(credentials|keystore\.json|[^/]*\.keystore|\.env($|\.))' "$RUNNER_TEMP/vibe2x-apk-entries.txt"; then
+            echo 'Credential material was packaged into the APK' >&2
+            exit 1
+          fi
+
+          echo "apk_path=$release_apk" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Vibe2X ${GITHUB_REF_NAME} Android release"
+            echo "- APK: \`$release_apk\`"
+            echo "- Size: $(stat -c%s "$release_apk") bytes"
+            echo "- SHA-256: $(sha256sum "$release_apk" | cut -d' ' -f1)"
+            echo '- Signature verified; APK signed after compilation using the release key'
+            echo '- Hermes bytecode embedded; Metro is not required'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vibe2X-${{ github.ref_name }}-Android
+          path: ${{ steps.verify.outputs.apk_path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release with Android APK
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" "${{ steps.verify.outputs.apk_path }}" \
+            --verify-tag \
+            --title "Vibe2X $GITHUB_REF_NAME" \
+            --generate-notes
+
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/vibe2x-release.keystore" "$RUNNER_TEMP/vibe2x-aligned.apk"

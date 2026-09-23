@@ -5,16 +5,22 @@
 
 **Find your vibe. Play it your way.**
 
-An open-source, local-first music player for Android.
+An open-source, local-first mobile music player.
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-7B2CFF.svg)](LICENSE)
-[![Platform: Android](https://img.shields.io/badge/platform-Android-3DDC84.svg)](#build-from-source)
 [![Expo SDK 57](https://img.shields.io/badge/Expo_SDK-57-000020.svg)](https://docs.expo.dev/versions/v57.0.0/)
 </div>
 
 ## Project status
 
-Vibe2X is under active development and does not currently publish an official release from this repository. Build it from source if you want to evaluate it. The generated `android/` project, signing keys, and release binaries are intentionally not tracked.
+Vibe2X is under active development. Version `0.1.0` is configured as the first public version, but tag `v0.1.0` and an official release have **not** been created. Generated native projects, signing keys, and release binaries are intentionally not tracked.
+
+| Mobile platform | Current status |
+| --- | --- |
+| Android | QA builds and real-device defect reports exist. A signed standalone release workflow is configured, but no official `0.1.0` APK has been built or published. |
+| iOS | An unsigned simulator-build workflow is configured. Its GitHub macOS build has not yet run; iOS playback and physical iPhone installation are not verified. Apple signing credentials are not configured. |
+
+There is no desktop app or desktop build workflow.
 
 ## Available now
 
@@ -37,7 +43,8 @@ These are source-level capabilities, not a claim that every device, Android vers
 ## Implemented, awaiting device verification
 
 - Transactional YouTube and YouTube Music playlist import with complete continuation pagination, unavailable-item reporting, and collision-safe local copies.
-- Spotify playlist metadata import in configured builds: Authorization Code with PKCE, explicit match review, and conversion to independently playable Vibe2X tracks. Spotify currently exposes playlist items only for playlists the authenticated user owns or collaborates on.
+- Local CSV/TXT playlist-file parsing and matching with high-confidence selection, explicit review for uncertain results, unavailable-row reporting, and normal local-playlist saving. The three-method Import Playlist UI directs YouTube links to the existing importer and Spotify/other-service exports to File Import. This new flow has not been device-tested.
+- The direct Spotify Web API/PKCE implementation is retained for development, but is not the primary user-facing import path. It has not been tested with a real Spotify account or client ID; Spotify currently restricts playlist-item access to playlists the authenticated user owns or collaborates on.
 
 These import paths are intentionally not listed under **Available now** until end-to-end Android UI testing is complete. The deterministic and live-provider checks completed so far are recorded under [Verification status](#verification-status).
 
@@ -46,7 +53,7 @@ These import paths are intentionally not listed under **Available now** until en
 - A configured lyrics provider and lyrics UI.
 - A complete local-provider implementation for local search, metadata browsing, and local playlists.
 - More advanced discovery, sorting, and filtering.
-- End-user playlist-file import/export and social sharing workflows.
+- Playlist-file export and social sharing workflows.
 - Equalizer and audio visualizer features.
 - Published, signed release builds and store distribution.
 
@@ -71,7 +78,8 @@ Playback request
 Playlist import
  └─ PlaylistImportEngine
      ├─ existing YouTubeResolver playlist metadata
-     └─ Spotify Web API metadata (OAuth PKCE)
+     ├─ local CSV/TXT metadata parser
+     └─ retained Spotify Web API metadata (OAuth PKCE)
          └─ MusicService search → confidence review → local Playlist
 ```
 
@@ -88,7 +96,7 @@ Important boundaries:
 
 ## Build from source
 
-### Prerequisites
+### Android prerequisites
 
 - Node.js 22.13 or newer (Expo SDK 57 minimum)
 - npm
@@ -96,7 +104,7 @@ Important boundaries:
 - Android Studio and Android SDK 36
 - `ANDROID_HOME` configured for your Android SDK
 
-### Reproducible debug build
+### Android debug build
 
 ```bash
 git clone https://github.com/saishivasanjeethpaikarao-jpg/Vibe2X.git
@@ -106,25 +114,34 @@ npx expo-doctor
 npx tsc --noEmit
 npm test
 npx expo prebuild --platform android --clean
-```
-
-On macOS or Linux:
-
-```bash
 cd android
-./gradlew clean assembleDebug
+./gradlew assembleDebug
 ```
 
-On Windows PowerShell:
+The debug APK is normally written under `android/app/build/outputs/apk/debug/`. It is a development build, not the standalone public release. The release workflow builds `:app:assembleRelease` with embedded Hermes JavaScript and verifies the signature, launcher, and bundle before publication.
 
-```powershell
-Set-Location android
-.\gradlew.bat clean assembleDebug
-```
+### iOS simulator verification
 
-The debug APK is normally written under `android/app/build/outputs/apk/debug/`. To build and install on a connected Android device or emulator, use `npm run android` after prebuild.
+The [iOS build workflow](.github/workflows/ios-build.yml) runs on GitHub macOS CI, generates a clean native iOS project, installs CocoaPods, and builds a Release-configuration simulator `.app` with `CODE_SIGNING_ALLOWED=NO`. This verifies compilation only; it does not produce an installable physical-iPhone build or establish iOS playback support. The bundled `note-native` stream extractor is Android-only, and iOS playback would need separate runtime verification.
 
-Release signing is intentionally not configured in Git. Supply your own signing credentials outside the repository if you create a release build.
+### Release identity and signing
+
+Both application identifiers are configured as `com.vibe2x.app`. Expo version is `0.1.0`, Android `versionCode` is `1`, and iOS `buildNumber` is `1`. Increase the platform build numbers for future distributed builds. Store availability and ownership of the identifier are not yet verified.
+
+The new Android identifier installs separately from earlier `com.sanyamjain04.NOTE` QA builds and does not inherit their local data. Export a backup before removing an old QA installation. Keep only the intended Vibe2X build installed when testing custom-scheme links, because old and new builds can both register the same schemes.
+
+The [Android release workflow](.github/workflows/android-release.yml) runs only for a stable `vX.Y.Z` tag whose commit is on `main` and whose version matches Expo and npm metadata. It also gates publication on the unsigned iOS simulator build. For the first release, the tag would be `v0.1.0`; **do not push it until the app and signing setup have been approved**. The workflow requires these GitHub Actions secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `VIBE2X_ANDROID_KEYSTORE_BASE64` | Base64-encoded bytes of the persistent Android release keystore; base64 is not encryption. |
+| `VIBE2X_ANDROID_KEYSTORE_PASSWORD` | Keystore password. |
+| `VIBE2X_ANDROID_KEY_ALIAS` | Signing-key alias. |
+| `VIBE2X_ANDROID_KEY_PASSWORD` | Key password. |
+
+Keep the original keystore backed up securely: Android updates must use the appropriate established signing identity. The workflow fails without these secrets and never substitutes an ephemeral QA or Android debug key. It uploads a verified APK as a workflow artifact and creates a GitHub Release with that APK only after the tag build succeeds. No keystore or password belongs in Git or the APK.
+
+The app retains `vibe2x://` deep links and `vibe2x-spotify://oauth/callback` for the retained direct Spotify PKCE path. Changing Android/iOS identifiers does not intentionally change these schemes. Clean prebuild can verify their native registration; actual deep-link and OAuth round trips still require runtime testing, and the Spotify redirect must remain registered with the developer application.
 
 ## Configuration
 
@@ -138,7 +155,9 @@ Resolver settings are stored locally on the device. Do not enter credentials int
 
 ### Spotify playlist import
 
-Spotify is used only as a playlist metadata source. Imported tracks are matched to the existing Vibe2X YouTube provider and saved as ordinary local Vibe2X playlist entries; later playback does not require Spotify.
+The user-facing Spotify route uses File Import: export a playlist as CSV or TXT with an external service such as [TuneMyMusic](https://www.tunemymusic.com/transfer/spotify-to-file), download the file, and choose it in Vibe2X. TuneMyMusic is not affiliated with Vibe2X. Vibe2X reads the selected file locally, matches song metadata to its existing playable provider, asks for review of uncertain matches, and saves a normal local playlist. It does not use Spotify audio. File Import is currently awaiting Android device QA.
+
+The direct Spotify OAuth/PKCE implementation remains in the source for development but is not the primary import screen path. A public client ID is **not required** for CSV/TXT File Import. For development of the direct API path only:
 
 Spotify requires a developer application and user authorization. Vibe2X uses Authorization Code with PKCE for this public mobile client and never uses a client secret. To enable it in a source build:
 
@@ -147,7 +166,7 @@ Spotify requires a developer application and user authorization. Vibe2X uses Aut
 3. Copy `.env.example` to `.env.local` and set `EXPO_PUBLIC_SPOTIFY_CLIENT_ID` to the application's public client ID.
 4. Rebuild the native app; OAuth schemes are native configuration and cannot be added by an over-the-air update.
 
-For the `android-qa.yml` GitHub Actions build, set the repository variable **`EXPO_PUBLIC_SPOTIFY_CLIENT_ID`** in Settings → Secrets and variables → Actions → Variables (or supply the same environment variable to a local build). The workflow passes this public identifier into Expo's bundle step. It is not a secret; anyone can inspect it in a distributed APK. Never put a Spotify Client Secret or token in that variable. If it is unset, the QA APK still builds and displays the existing "Spotify import is not configured in this build" message. Register `vibe2x-spotify://oauth/callback` for the same Spotify application before testing OAuth.
+For the `android-qa.yml` GitHub Actions build, set the repository variable **`EXPO_PUBLIC_SPOTIFY_CLIENT_ID`** in Settings → Secrets and variables → Actions → Variables only if testing the retained direct API path. The workflow passes this public identifier into Expo's bundle step. It is not a secret; anyone can inspect it in a distributed APK. Never put a Spotify Client Secret or token in that variable. Register `vibe2x-spotify://oauth/callback` for the same Spotify application before testing OAuth.
 
 Never place a Spotify client secret, access token, or refresh token in the repository or APK. OAuth tokens are stored with `expo-secure-store` on the device and are not logged.
 
