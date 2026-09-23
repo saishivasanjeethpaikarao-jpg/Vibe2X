@@ -1,0 +1,22 @@
+{
+  "cli": {
+    "version": ">= 16.0.0"
+  },
+  "build": {
+    "production": {
+      "ios": {
+        "buildNumber": "1",
+        "credentialsSource": "remote"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "<MANUAL>",
+        "ascAppId": "<MANUAL>",
+        "appleTeamId": "<MANUAL>"
+      }
+    }
+  }
+}

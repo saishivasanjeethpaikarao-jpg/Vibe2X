@@ -17,10 +17,17 @@ Vibe2X is under active development. Version `0.1.0` is configured as the first p
 
 | Mobile platform | Current status |
 | --- | --- |
-| Android | QA builds and real-device defect reports exist. A signed standalone release workflow is configured, but no official `0.1.0` APK has been built or published. |
-| iOS | An unsigned simulator-build workflow is configured. Its GitHub macOS build has not yet run; iOS playback and physical iPhone installation are not verified. Apple signing credentials are not configured. |
+| Android | **Alpha — GitHub Release**. Standalone signed APK available in GitHub Releases. |
+| iOS | **Build verification**. Unsigned simulator build verified in CI; TestFlight Alpha distribution is configured and pending manual Apple Developer authentication. |
 
-There is no desktop app or desktop build workflow.
+## Download & Installation
+
+**Android**
+- [Download Vibe2X APK from GitHub Releases](https://github.com/saishivasanjeethpaikarao-jpg/Vibe2X/releases)
+- Download the `.apk` file, transfer it to your Android device, and install it.
+
+**iOS**
+- iOS distribution uses Apple TestFlight. Access for approved testers will be provided once the app passes Apple review and TestFlight processing.
 
 ## Available now
 

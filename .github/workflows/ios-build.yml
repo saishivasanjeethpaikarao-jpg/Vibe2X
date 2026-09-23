@@ -79,7 +79,7 @@ jobs:
               config = json.load(source)['expo']
           with open(os.path.join(os.environ['APP_PATH'], 'Info.plist'), 'rb') as source:
               info = plistlib.load(source)
-          assert info['CFBundleIdentifier'] == config['ios']['bundleIdentifier'] == 'com.vibe2x.app'
+          assert info['CFBundleIdentifier'] == config['ios']['bundleIdentifier'] == 'io.github.saishivasanjeethpaikarao.vibe2x'
           assert info['CFBundleShortVersionString'] == config['version']
           assert info['CFBundleVersion'] == config['ios']['buildNumber']
           schemes = {scheme for item in info.get('CFBundleURLTypes', []) for scheme in item.get('CFBundleURLSchemes', [])}

@@ -128,8 +128,8 @@ jobs:
 
           "$apksigner" verify --verbose --print-certs "$output_apk"
           "$aapt" dump badging "$output_apk" > /tmp/vibe2x-badging.txt
-          grep -F "package: name='com.vibe2x.app'" /tmp/vibe2x-badging.txt
-          grep -F "launchable-activity: name='com.vibe2x.app.MainActivity'" /tmp/vibe2x-badging.txt
+          grep -F "package: name='io.github.saishivasanjeethpaikarao.vibe2x'" /tmp/vibe2x-badging.txt
+          grep -F "launchable-activity: name='io.github.saishivasanjeethpaikarao.vibe2x.MainActivity'" /tmp/vibe2x-badging.txt
           version="$(node -p "require('./app.json').expo.version")"
           version_code="$(node -p "require('./app.json').expo.android.versionCode")"
           grep -F "versionCode='$version_code' versionName='$version'" /tmp/vibe2x-badging.txt
@@ -146,7 +146,7 @@ jobs:
             exit 1
           fi
 
-          unzip -l "$output_apk" > /tmp/vibe2x-apk-entries.txt
+          unzip -Z1 "$output_apk" > /tmp/vibe2x-apk-entries.txt
           grep -Eq 'assets/index\.android\.bundle$' /tmp/vibe2x-apk-entries.txt
           unzip -p "$output_apk" assets/index.android.bundle > /tmp/index.android.bundle
           bundle_magic="$(od -An -tx1 -N8 /tmp/index.android.bundle | tr -d ' \n')"

@@ -39,7 +39,7 @@ jobs:
           if (tag !== `v${app.version}` || pkg.version !== app.version || lock.version !== app.version || lock.packages[''].version !== app.version) {
             throw new Error('Git tag, Expo version, package.json, and package-lock.json must agree');
           }
-          if (app.android.package !== 'com.vibe2x.app' || app.ios.bundleIdentifier !== 'com.vibe2x.app') {
+          if (app.android.package !== 'io.github.saishivasanjeethpaikarao.vibe2x' || app.ios.bundleIdentifier !== 'io.github.saishivasanjeethpaikarao.vibe2x') {
             throw new Error('Vibe2X application identifiers do not match release configuration');
           }
           if (!Number.isInteger(app.android.versionCode) || app.android.versionCode < 1 || !/^\d+$/.test(app.ios.buildNumber)) {
@@ -102,10 +102,10 @@ jobs:
       - name: Sign APK with persistent release key
         shell: bash
         env:
-          RELEASE_KEYSTORE_BASE64: ${{ secrets.VIBE2X_ANDROID_KEYSTORE_BASE64 }}
-          RELEASE_STORE_PASSWORD: ${{ secrets.VIBE2X_ANDROID_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.VIBE2X_ANDROID_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.VIBE2X_ANDROID_KEY_PASSWORD }}
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.VIBE2X_KEYSTORE_BASE64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.VIBE2X_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.VIBE2X_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.VIBE2X_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           for name in RELEASE_KEYSTORE_BASE64 RELEASE_STORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
@@ -132,7 +132,7 @@ jobs:
             --ks-key-alias "$RELEASE_KEY_ALIAS" \
             --ks-pass env:RELEASE_STORE_PASSWORD \
             --key-pass env:RELEASE_KEY_PASSWORD \
-            --out "dist/release/Vibe2X-${GITHUB_REF_NAME}-Android.apk" \
+            --out "dist/release/Vibe2X-${GITHUB_REF_NAME}-android.apk" \
             "$RUNNER_TEMP/vibe2x-aligned.apk"
 
       - name: Verify signed APK and embedded Hermes bundle
@@ -140,7 +140,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          release_apk="dist/release/Vibe2X-${GITHUB_REF_NAME}-Android.apk"
+          release_apk="dist/release/Vibe2X-${GITHUB_REF_NAME}-android.apk"
           test -s "$release_apk"
 
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
@@ -149,8 +149,8 @@ jobs:
           test -x "$aapt"
           "$apksigner" verify --verbose --print-certs "$release_apk"
           "$aapt" dump badging "$release_apk" > "$RUNNER_TEMP/vibe2x-badging.txt"
-          grep -F "package: name='com.vibe2x.app'" "$RUNNER_TEMP/vibe2x-badging.txt"
-          grep -F "launchable-activity: name='com.vibe2x.app.MainActivity'" "$RUNNER_TEMP/vibe2x-badging.txt"
+          grep -F "package: name='io.github.saishivasanjeethpaikarao.vibe2x'" "$RUNNER_TEMP/vibe2x-badging.txt"
+          grep -F "launchable-activity: name='io.github.saishivasanjeethpaikarao.vibe2x.MainActivity'" "$RUNNER_TEMP/vibe2x-badging.txt"
           version="$(node -p "require('./app.json').expo.version")"
           version_code="$(node -p "require('./app.json').expo.android.versionCode")"
           grep -F "versionCode='$version_code' versionName='$version'" "$RUNNER_TEMP/vibe2x-badging.txt"
@@ -165,7 +165,7 @@ jobs:
             echo 'Expo development launcher is present in release APK' >&2
             exit 1
           fi
-          unzip -l "$release_apk" > "$RUNNER_TEMP/vibe2x-apk-entries.txt"
+          unzip -Z1 "$release_apk" > "$RUNNER_TEMP/vibe2x-apk-entries.txt"
           grep -Eq 'assets/index\.android\.bundle$' "$RUNNER_TEMP/vibe2x-apk-entries.txt"
           unzip -p "$release_apk" assets/index.android.bundle > "$RUNNER_TEMP/index.android.bundle"
           magic="$(od -An -tx1 -N8 "$RUNNER_TEMP/index.android.bundle" | tr -d ' \n')"
@@ -175,12 +175,15 @@ jobs:
             exit 1
           fi
 
+          sha256sum "$release_apk" | awk '{print $1}' > "${release_apk}.sha256"
+
           echo "apk_path=$release_apk" >> "$GITHUB_OUTPUT"
+          echo "sha_path=${release_apk}.sha256" >> "$GITHUB_OUTPUT"
           {
             echo "### Vibe2X ${GITHUB_REF_NAME} Android release"
             echo "- APK: \`$release_apk\`"
             echo "- Size: $(stat -c%s "$release_apk") bytes"
-            echo "- SHA-256: $(sha256sum "$release_apk" | cut -d' ' -f1)"
+            echo "- SHA-256: $(cat "${release_apk}.sha256")"
             echo '- Signature verified; APK signed after compilation using the release key'
             echo '- Hermes bytecode embedded; Metro is not required'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -188,8 +191,10 @@ jobs:
       - name: Upload APK as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Vibe2X-${{ github.ref_name }}-Android
-          path: ${{ steps.verify.outputs.apk_path }}
+          name: Vibe2X-${{ github.ref_name }}-android
+          path: |
+            ${{ steps.verify.outputs.apk_path }}
+            ${{ steps.verify.outputs.sha_path }}
           if-no-files-found: error
 
       - name: Publish GitHub release with Android APK
@@ -198,10 +203,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$GITHUB_REF_NAME" "${{ steps.verify.outputs.apk_path }}" \
+
+          cat > release-notes.md <<'EOF'
+          ### Vibe2X Android Alpha
+
+          This is the first official pre-release of Vibe2X for Android.
+
+          **Features**
+          - Local music library playback
+          - YouTube and generic playlist import (experimental)
+          - Background audio & notification controls
+          - Smart Continue and queue management
+
+          **Requirements**
+          - Android 7.0 (API 24) or newer
+
+          **Known Limitations**
+          - iOS TestFlight build is handled separately
+          - Imports may fail on region-locked content
+
+          **License & Attribution**
+          Vibe2X is licensed under GPL-3.0-or-later.
+          Originally based on NØTE by Sanyam Jain.
+          Native audio resolution is powered by Team NewPipe's extractor.
+          EOF
+
+          gh release create "$GITHUB_REF_NAME" \
+            "${{ steps.verify.outputs.apk_path }}" \
+            "${{ steps.verify.outputs.sha_path }}" \
             --verify-tag \
-            --title "Vibe2X $GITHUB_REF_NAME" \
-            --generate-notes
+            --title "Vibe2X $GITHUB_REF_NAME Alpha" \
+            --notes-file release-notes.md \
+            --prerelease
 
       - name: Remove temporary signing material
         if: always()

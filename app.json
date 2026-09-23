@@ -12,7 +12,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
-      "bundleIdentifier": "com.vibe2x.app",
+      "bundleIdentifier": "io.github.saishivasanjeethpaikarao.vibe2x",
       "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
@@ -38,7 +38,7 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
-      "package": "com.vibe2x.app"
+      "package": "io.github.saishivasanjeethpaikarao.vibe2x"
     },
     "plugins": [
       "expo-font",
