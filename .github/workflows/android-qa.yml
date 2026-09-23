@@ -3,6 +3,7 @@ name: Android standalone QA build
 on:
   push:
     branches:
+      - main
       - ui/liquid-vibe
   workflow_dispatch:
 
