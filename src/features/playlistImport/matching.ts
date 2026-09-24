@@ -105,12 +105,10 @@ export function scoreTrackMatch(source: SourceTrack, candidate: Track): MatchCan
   }
 
   const albumScore = source.album && candidate.album ? overlap(source.album, candidate.album) : 0.5;
-  let score =
-    titleSimilarity * 0.5 +
-    primaryScore * 0.27 +
-    allArtistScore * 0.1 +
-    durationScore * 0.08 +
-    albumScore * 0.05;
+  const titleOnly = sourceArtists.length === 0;
+  let score = titleOnly
+    ? titleSimilarity * 0.85 + durationScore * 0.1 + albumScore * 0.05
+    : titleSimilarity * 0.5 + primaryScore * 0.27 + allArtistScore * 0.1 + durationScore * 0.08 + albumScore * 0.05;
 
   // Edition words are musically meaningful. A studio original must not be
   // silently replaced by a live/remix version with the same title and artist.
@@ -120,10 +118,12 @@ export function scoreTrackMatch(source: SourceTrack, candidate: Track): MatchCan
   }
 
   // Same-title songs by the wrong artist are never acceptable auto-matches.
-  if (primaryScore < 0.45) score -= 0.3;
+  if (!titleOnly && primaryScore < 0.45) score -= 0.3;
 
   score = Math.max(0, Math.min(1, score));
-  const confidence = confidenceFor(score);
+  // Without an artist, a same-title song can be a different recording.
+  // Surface it for review, but never silently auto-accept it.
+  const confidence = titleOnly && score >= 0.58 ? 'MEDIUM' : confidenceFor(score);
   if (confidence === 'NO_MATCH') return null;
 
   return { track: candidate, score, confidence, reasons };

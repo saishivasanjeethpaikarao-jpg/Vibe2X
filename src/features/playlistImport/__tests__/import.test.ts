@@ -102,6 +102,16 @@ describe('playlist import transaction preparation', () => {
     expect(collectShelfItems(fixture).flatMap((shelf) => shelf.items)).toHaveLength(1);
   });
 
+  it('finds continuation items even when a response also has contents', () => {
+    const fixture = {
+      contents: { sectionListRenderer: { contents: [] } },
+      onResponseReceivedActions: [{ appendContinuationItemsAction: {
+        continuationItems: [{ musicResponsiveListItemRenderer: { playlistItemData: { videoId: 'second' } } }],
+      } }],
+    };
+    expect(collectShelfItems(fixture).flatMap((shelf) => shelf.items)).toHaveLength(1);
+  });
+
   it('reports unavailable items without creating broken tracks', async () => {
     const resolver = { getPlaylist: vi.fn().mockResolvedValue(page([track('one')], undefined, 2)) };
     const fetched = await new YouTubePlaylistSource(resolver).fetchPlaylist(

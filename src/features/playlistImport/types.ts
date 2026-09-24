@@ -54,7 +54,7 @@ export type SpotifyTrackMatch = {
 
 export type ImportProgress =
   | { phase: 'fetching'; loaded: number; total?: number }
-  | { phase: 'matching'; completed: number; total: number };
+  | { phase: 'matching'; completed: number; total: number; matched?: number; needsReview?: number; unavailable?: number };
 
 export type ImportCollision = {
   sameSource: Playlist | null;

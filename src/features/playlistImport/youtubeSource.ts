@@ -36,13 +36,15 @@ export class YouTubePlaylistSource implements PlaylistSourceClient {
       first = await this.resolver.getPlaylist(parsed.playlistId, { signal });
     } catch (error) {
       if (signal.aborted) cancelled();
+      if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] FETCH_YOUTUBE', error instanceof Error ? error.name : 'unknown');
       if (error instanceof AppError && error.kind === 'invalid_playlist') {
         throw appErrorWithMessage(
           'invalid_playlist',
-          'This link was recognized, but YouTube did not expose a public playlist. Check that it is available in YouTube Music.'
+          'This playlist is private, unavailable, or has no public tracks on YouTube Music.'
         );
       }
-      throw error;
+      if (error instanceof AppError && (error.kind === 'network' || error.kind === 'timeout' || error.kind === 'rate_limited')) throw error;
+      throw appErrorWithMessage('provider_failed', 'Playlist could not be loaded. Try again later.');
     }
     const metadata = first.playlist;
     const tracks: Track[] = [];
@@ -78,11 +80,7 @@ export class YouTubePlaylistSource implements PlaylistSourceClient {
         });
       } catch (error) {
         if (signal.aborted) cancelled();
-        console.warn('[playlist-import] YouTube pagination failed', {
-          playlistId: parsed.playlistId,
-          page: pageCount + 1,
-          error: error instanceof Error ? error.message : String(error),
-        });
+        if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] FETCH_YOUTUBE_PAGE', pageCount + 1, error instanceof Error ? error.name : 'unknown');
         throw appErrorWithMessage(
           'provider_failed',
           'YouTube stopped responding before the full playlist loaded. Nothing was saved.'

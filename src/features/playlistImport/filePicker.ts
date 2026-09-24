@@ -19,6 +19,17 @@ export async function pickPlaylistFile(
   if (asset.size && asset.size > 5_000_000) {
     throw appErrorWithMessage('invalid_playlist', 'This playlist file is too large. Use an export smaller than 5 MB.');
   }
-  const contents = asset.file ? await asset.file.text() : await read(asset.uri);
-  return parsePlaylistFile(asset.name, contents);
+  let contents: string;
+  try {
+    contents = asset.file ? await asset.file.text() : await read(asset.uri);
+  } catch (error) {
+    if (__DEV__) console.warn('[playlist-import] FILE_READ', error instanceof Error ? error.name : 'unknown');
+    throw appErrorWithMessage('invalid_playlist', 'Could not read that file from your device. Download it locally and try again.');
+  }
+  try {
+    return parsePlaylistFile(asset.name, contents, { mimeType: asset.mimeType });
+  } catch (error) {
+    if (__DEV__) console.warn('[playlist-import] PARSE', error instanceof Error ? error.name : 'unknown');
+    throw error;
+  }
 }

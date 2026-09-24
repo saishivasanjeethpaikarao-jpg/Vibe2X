@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('expo-document-picker', () => ({ getDocumentAsync: vi.fn() }));
 vi.mock('expo-file-system', () => ({ File: class {} }));
-import { parsePlaylistFile } from '../fileSource';
+import { parsePlaylistFile, PlaylistColumnMappingRequired } from '../fileSource';
 import { pickPlaylistFile } from '../filePicker';
 import { PlaylistImportEngine } from '../engine';
 import { Track } from '../../../core/types';
@@ -17,16 +17,72 @@ const engine = (results: Track[]) => new PlaylistImportEngine({
 });
 
 describe('playlist file parsing', () => {
+  it.each([
+    ['Title,Artist', 'Kesariya,Arijit Singh'],
+    ['Track Name,Artist Name', 'Kesariya,Arijit Singh'],
+    ['Song,Singer', 'Kesariya,Arijit Singh'],
+    ['Name,Artists', 'Kesariya,Arijit Singh'],
+    [' Track_Title , Creator ', 'Kesariya,Arijit Singh'],
+  ])('recognizes %s and accepts a handmade row', (header, row) => {
+    const parsed = parsePlaylistFile('handmade.csv', `${header}\r\n${row}\r\nBeliever,Imagine Dragons`);
+    expect(parsed.tracks.map((item) => item.title)).toEqual(['Kesariya', 'Believer']);
+    expect(parsed.tracks[0].artists).toEqual(['Arijit Singh']);
+  });
+
+  it('accepts title-only CSV and leaves matching for review', async () => {
+    const playlist = parsePlaylistFile('titles.csv', 'Title\nJóga\n');
+    expect(playlist.tracks[0].artists).toEqual([]);
+    const matches = await engine([track('joga', 'Jóga')]).matchMetadata(playlist, new AbortController().signal);
+    expect(matches[0].confidence).toBe('MEDIUM');
+    expect(matches[0].selectedTrack).toBeNull();
+  });
+
+  it('accepts BOM, semicolons, reordered optional fields and unknown fields', () => {
+    const playlist = parsePlaylistFile('list.csv', '\uFEFFArtist Name;Release;Song Name;Spotify URL;Extra\r\nBjörk;Debut;Jóga;https://open.spotify.com/track/example;ignored');
+    expect(playlist.tracks[0]).toMatchObject({ title: 'Jóga', artists: ['Björk'], album: 'Debut' });
+    expect(playlist.tracks[0].sourceUrl).toContain('spotify.com');
+  });
+
+  it('accepts tabular CSV and tab-separated TXT exports', () => {
+    for (const name of ['list.tsv', 'list.txt']) {
+      const playlist = parsePlaylistFile(name, 'Artist\tTrack Title\tDuration ms\nBjörk\tJóga\t180000');
+      expect(playlist.tracks[0]).toMatchObject({ title: 'Jóga', artists: ['Björk'], duration: 180 });
+    }
+  });
+
+  it('offers explicit mapping for headerless and unknown-header two-column files', () => {
+    const data = 'Kesariya,Arijit Singh\nBeliever,Imagine Dragons';
+    expect(() => parsePlaylistFile('plain.csv', data)).toThrow(PlaylistColumnMappingRequired);
+    const mapped = parsePlaylistFile('plain.csv', data, { mapping: { titleIndex: 0, artistIndex: 1, hasHeader: false } });
+    expect(mapped.tracks.map((item) => item.title)).toEqual(['Kesariya', 'Believer']);
+    const inverse = parsePlaylistFile('plain.csv', data, { mapping: { titleIndex: 1, artistIndex: 0, hasHeader: false } });
+    expect(inverse.tracks[0].title).toBe('Arijit Singh');
+    const unknown = parsePlaylistFile('columns.csv', 'Song_Label,Musician\nKesariya,Arijit Singh',
+      { mapping: { titleIndex: 0, artistIndex: 1, hasHeader: true } });
+    expect(unknown.tracks).toHaveLength(1);
+  });
+
+  it('reads title-only, title–artist and ambiguous TXT lines without rejecting the file', () => {
+    const playlist = parsePlaylistFile('songs.txt', 'Kesariya - Arijit Singh\nBeliever — Imagine Dragons\nOne More Song\n\n');
+    expect(playlist.tracks.map((item) => item.title)).toEqual(['Kesariya', 'Believer', 'One More Song']);
+    expect(playlist.tracks.map((item) => item.artists)).toEqual([['Arijit Singh'], ['Imagine Dragons'], []]);
+  });
+
+  it('uses MIME/content when Android supplies no reliable extension', () => {
+    expect(parsePlaylistFile('download', 'Title,Artist\nJóga,Björk', { mimeType: 'text/csv' }).tracks).toHaveLength(1);
+    expect(parsePlaylistFile('download', 'Jóga\nBeliever', { mimeType: 'text/plain' }).tracks).toHaveLength(2);
+  });
+
   it('reads TuneMyMusic-style CSV metadata and playlist name', () => {
     const playlist = parsePlaylistFile('export.csv', 'Track name,Artist name,Album,Playlist name,Type,ISRC\nJóga,Björk,Homogenic,Night Drive,track,ABC\n');
     expect(playlist.name).toBe('Night Drive');
     expect(playlist.tracks[0]).toMatchObject({ title: 'Jóga', artists: ['Björk'], album: 'Homogenic' });
   });
 
-  it('reads TXT Artist - Title lines', () => {
+  it('reads ambiguous TXT lines without losing either title/artist interpretation', () => {
     const playlist = parsePlaylistFile('Evening.txt', 'Björk - Jóga\r\nRadiohead - Weird Fishes\r\n');
     expect(playlist.name).toBe('Evening');
-    expect(playlist.tracks.map((item) => item.title)).toEqual(['Jóga', 'Weird Fishes']);
+    expect(playlist.tracks.map((item) => item.alternate?.title)).toEqual(['Jóga', 'Weird Fishes']);
   });
 
   it('can match a Title - Artist TXT export without assuming its direction', async () => {
@@ -54,12 +110,12 @@ describe('playlist file parsing', () => {
     expect(matches[0].confidence).toBe('HIGH');
   });
 
-  it('skips blank and malformed rows and keeps duplicate source entries for review', () => {
+  it('keeps title-only rows and duplicate source entries for review', () => {
     const playlist = parsePlaylistFile('songs.csv', 'Track name,Artist name\n\nJóga,Björk\nNo Artist,\nJóga,Björk\n');
-    expect(playlist.tracks).toHaveLength(2);
-    expect(playlist.tracks[0].key).not.toBe(playlist.tracks[1].key);
-    expect(playlist.tracks[0].sourceId).toBe(playlist.tracks[1].sourceId);
-    expect(playlist.unavailableCount).toBe(1);
+    expect(playlist.tracks).toHaveLength(3);
+    expect(playlist.tracks[0].key).not.toBe(playlist.tracks[2].key);
+    expect(playlist.tracks[0].sourceId).toBe(playlist.tracks[2].sourceId);
+    expect(playlist.tracks[1].artists).toEqual([]);
   });
 
   it('handles a 500+ track file without dropping order', () => {
@@ -82,7 +138,7 @@ describe('playlist file parsing', () => {
 
   it('rejects unsupported or malformed files', () => {
     expect(() => parsePlaylistFile('playlist.json', '{}')).toThrow();
-    expect(() => parsePlaylistFile('playlist.csv', 'Wrong,Columns\na,b')).toThrow();
+    expect(() => parsePlaylistFile('playlist.csv', 'Wrong,Columns\na,b')).toThrow('Choose the columns');
     expect(() => parsePlaylistFile('playlist.csv', 'Track name,Artist name\n"unfinished,Björk')).toThrow();
   });
 });
@@ -114,6 +170,23 @@ describe('file matching and picker', () => {
     const pick = vi.fn(async () => ({ canceled: true as const, assets: null }));
     expect(await pickPlaylistFile(pick, read)).toBeNull();
     expect(read).not.toHaveBeenCalled();
+  });
+
+  it('reads a copied Android content URI without trusting a missing MIME or extension', async () => {
+    const read = vi.fn(async () => 'Title,Artist\nKesariya,Arijit Singh');
+    const pick = vi.fn(async () => ({ canceled: false as const, assets: [{
+      name: 'download', uri: 'content://provider/document/playlist', mimeType: 'application/octet-stream', size: 34, lastModified: 0,
+    }] }));
+    const playlist = await pickPlaylistFile(pick, read);
+    expect(read).toHaveBeenCalledWith('content://provider/document/playlist');
+    expect(playlist?.tracks[0].title).toBe('Kesariya');
+  });
+
+  it('skips rows with missing title and rejects an empty file', () => {
+    const playlist = parsePlaylistFile('songs.csv', 'Title,Artist\n,Artist\nGood,Artist');
+    expect(playlist.tracks.map((item) => item.title)).toEqual(['Good']);
+    expect(playlist.unavailableCount).toBe(1);
+    expect(() => parsePlaylistFile('empty.txt', ' \n\n')).toThrow('No readable songs');
   });
 
   it('cancels matching before a local playlist can be prepared', async () => {

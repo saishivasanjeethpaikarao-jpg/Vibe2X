@@ -66,6 +66,15 @@ export async function flushWrites(): Promise<boolean> {
   return results.every(Boolean);
 }
 
+/** Flush one critical write without coupling success to unrelated queued data. */
+export async function flushWrite(k: string): Promise<boolean> {
+  const timer = timers.get(k);
+  if (timer) clearTimeout(timer);
+  timers.delete(k);
+  if (!pending.has(k)) return true;
+  return writeJson(k, pending.get(k));
+}
+
 export async function removeKey(k: string): Promise<void> {
   pending.delete(k);
   const t = timers.get(k);

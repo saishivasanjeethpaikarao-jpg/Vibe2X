@@ -25,6 +25,8 @@ import { useSnackbar } from '../components/common/SnackbarContext';
 import { useLibrary } from '../hooks/useLibrary';
 import { playlistImportEngine } from '../features/playlistImport/runtime';
 import { pickPlaylistFile } from '../features/playlistImport/filePicker';
+import { parsePlaylistFile, PlaylistColumnMappingRequired } from '../features/playlistImport/fileSource';
+import { flushWrite, STORAGE_KEYS } from '../core/storage';
 import {
   ImportProgress,
   PreparedImport,
@@ -48,7 +50,7 @@ export default function ImportPlaylistScreen() {
   const navigation = useNavigation<ImportNavigation>();
   const { show: showSnackbar } = useSnackbar();
   const route = useRoute<ImportRoute>();
-  const { playlists, createImportedPlaylist, createPlaylist } = useLibrary();
+  const { playlists, createImportedPlaylist, createPlaylist, deletePlaylist } = useLibrary();
   const abortRef = useRef<AbortController | null>(null);
   const savingRef = useRef(false);
 
@@ -65,6 +67,10 @@ export default function ImportPlaylistScreen() {
   const [playlistName, setPlaylistName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
+  const [columnIssue, setColumnIssue] = useState<PlaylistColumnMappingRequired | null>(null);
+  const [titleColumn, setTitleColumn] = useState(0);
+  const [artistColumn, setArtistColumn] = useState<number | null>(1);
+  const [firstRowHeaders, setFirstRowHeaders] = useState(false);
 
   const parsed = useMemo(() => playlistImportEngine.detect(url), [url]);
   const youtubeDetected = parsed?.source === 'youtube';
@@ -113,6 +119,7 @@ export default function ImportPlaylistScreen() {
     setPlaylistName('');
     setError(null);
     setSavedId(null);
+    setColumnIssue(null);
     savingRef.current = false;
   };
 
@@ -147,28 +154,42 @@ export default function ImportPlaylistScreen() {
     }
   };
 
+  const matchFile = async (fetched: SourcePlaylist, controller: AbortController) => {
+    setColumnIssue(null);
+    setSourcePlaylist(fetched);
+    setPlaylistName(playlistImportEngine.collisionFor(fetched, playlists).suggestedName);
+    setMatches([]);
+    setPhase('matching');
+    setProgress({ phase: 'matching', completed: 0, total: fetched.tracks.length });
+    const resolved = await playlistImportEngine.matchMetadata(fetched, controller.signal, setProgress);
+    if (controller.signal.aborted) return;
+    setMatches(resolved);
+    setPhase('preview');
+  };
+
   const chooseFile = async (origin: 'spotify' | 'other') => {
     if (phase !== 'idle' || abortRef.current) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setFileOrigin(origin);
     setError(null);
+    setColumnIssue(null);
     setPhase('picking');
     try {
       const fetched = await pickPlaylistFile();
       if (controller.signal.aborted) return;
       if (!fetched) { setPhase('idle'); return; }
-      setSourcePlaylist(fetched);
-      setPlaylistName(playlistImportEngine.collisionFor(fetched, playlists).suggestedName);
-      setMatches([]);
-      setPhase('matching');
-      setProgress({ phase: 'matching', completed: 0, total: fetched.tracks.length });
-      const resolved = await playlistImportEngine.matchMetadata(fetched, controller.signal, setProgress);
-      if (controller.signal.aborted) return;
-      setMatches(resolved);
-      setPhase('preview');
+      await matchFile(fetched, controller);
     } catch (cause) {
       if (!controller.signal.aborted) {
+        if (cause instanceof PlaylistColumnMappingRequired) {
+          setColumnIssue(cause);
+          setTitleColumn(0);
+          setArtistColumn(cause.columns.length > 1 ? 1 : null);
+          setFirstRowHeaders(false);
+          setPhase('idle');
+          return;
+        }
         const text = cause instanceof AppError
           ? messageFor(cause)
           : 'Could not read that file. Choose a CSV or TXT playlist export and try again.';
@@ -183,6 +204,30 @@ export default function ImportPlaylistScreen() {
     }
   };
 
+  const confirmColumns = async () => {
+    if (!columnIssue || phase !== 'idle' || titleColumn === artistColumn) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setError(null);
+    setPhase('picking');
+    try {
+      const fetched = parsePlaylistFile(columnIssue.fileName, columnIssue.contents, {
+        mimeType: columnIssue.mimeType,
+        mapping: { titleIndex: titleColumn, artistIndex: artistColumn, hasHeader: firstRowHeaders },
+      });
+      await matchFile(fetched, controller);
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        const text = messageFor(cause);
+        setError(text);
+        showSnackbar(text);
+        setPhase('idle');
+      }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  };
+
   const cancelActive = () => {
     abortRef.current?.abort();
     abortRef.current = null;
@@ -190,6 +235,7 @@ export default function ImportPlaylistScreen() {
     setSourcePlaylist(null);
     setMatches([]);
     setPlaylistName('');
+    setColumnIssue(null);
     setError('Import cancelled. Nothing was saved.');
     setPhase('idle');
   };
@@ -206,12 +252,8 @@ export default function ImportPlaylistScreen() {
     );
   };
 
-  const save = () => {
+  const save = async () => {
     if (savingRef.current || !sourcePlaylist || !prepared || !playlistName.trim() || nameTaken) return;
-    if (prepared.needsReview > 0) {
-      setPhase('review');
-      return;
-    }
     if (!prepared.tracks.length) {
       setError('No playable tracks are selected. Review matches before saving.');
       return;
@@ -219,6 +261,7 @@ export default function ImportPlaylistScreen() {
 
     savingRef.current = true;
     setPhase('saving');
+    let createdId: string | null = null;
     try {
       const saved = sourcePlaylist.source === 'file'
         ? createPlaylist(playlistName, prepared.tracks)
@@ -243,11 +286,16 @@ export default function ImportPlaylistScreen() {
         },
         { allowSourceCopy: Boolean(collision?.sameSource) }
       );
+      createdId = saved.id;
+      if (!(await flushWrite(STORAGE_KEYS.playlists))) throw new Error('Playlist storage failed');
       setSavedId(saved.id);
       setPhase('success');
+      showSnackbar(`Playlist imported · ${prepared.tracks.length} songs added`);
     } catch (cause) {
+      if (createdId) deletePlaylist(createdId);
       savingRef.current = false;
-      setError(messageFor(cause));
+      if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] SAVE', cause instanceof Error ? cause.name : 'unknown');
+      setError(cause instanceof AppError ? messageFor(cause) : 'Could not save this playlist. Please try again.');
       setPhase('preview');
     }
   };
@@ -414,7 +462,47 @@ export default function ImportPlaylistScreen() {
             <Text style={styles.title}>Bring your music with you.</Text>
             <Text style={styles.body}>Choose how you want to bring a playlist into Vibe2X.</Text>
 
-            {!sourcePlaylist && !isWorking && (
+            {columnIssue && !isWorking && (
+              <View style={styles.mappingBlock} accessibilityLiveRegion="polite">
+                <Text style={styles.previewName}>Choose file columns</Text>
+                <Text style={styles.methodBody}>We couldn't identify the song-title column automatically. Check a sample from your file, then choose which column contains each field.</Text>
+                <Text style={styles.mappingSample} numberOfLines={3}>
+                  {columnIssue.sample.map((value, index) => `Column ${index + 1}: ${value || '(empty)'}`).join('\n')}
+                </Text>
+                <Text style={styles.label}>Song title</Text>
+                <View style={styles.mappingChoices}>
+                  {columnIssue.columns.map((_, index) => (
+                    <TouchableOpacity key={`title-${index}`} style={[styles.mappingChoice, titleColumn === index && styles.mappingSelected]}
+                      onPress={() => setTitleColumn(index)} accessibilityRole="radio" accessibilityState={{ selected: titleColumn === index }}>
+                      <Text style={styles.mappingChoiceText}>Column {index + 1}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.label}>Artist (optional)</Text>
+                <View style={styles.mappingChoices}>
+                  {[null, ...columnIssue.columns.map((_, index) => index)].map((index) => (
+                    <TouchableOpacity key={`artist-${index ?? 'none'}`} style={[styles.mappingChoice, artistColumn === index && styles.mappingSelected]}
+                      onPress={() => setArtistColumn(index)} accessibilityRole="radio" accessibilityState={{ selected: artistColumn === index }}>
+                      <Text style={styles.mappingChoiceText}>{index === null ? 'None' : `Column ${index + 1}`}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity style={styles.howButton} onPress={() => setFirstRowHeaders((value) => !value)}
+                  accessibilityRole="checkbox" accessibilityState={{ checked: firstRowHeaders }}>
+                  <Text style={styles.howTitle}>First row contains column names</Text>
+                  {firstRowHeaders && <Check size={20} color={COLORS.accent.magenta} />}
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.primaryButton, titleColumn === artistColumn && styles.buttonDisabled]}
+                  disabled={titleColumn === artistColumn} onPress={() => void confirmColumns()} accessibilityRole="button">
+                  <Text style={styles.primaryButtonText}>Continue with these columns</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.textButton} onPress={() => setColumnIssue(null)}>
+                  <Text style={styles.textButtonLabel}>Choose another file</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {!sourcePlaylist && !isWorking && !columnIssue && (
               <View style={styles.methods}>
                 <View style={[styles.methodCard, styles.youtubeCard]}>
                   <View style={styles.methodHeading}>
@@ -443,7 +531,7 @@ export default function ImportPlaylistScreen() {
                   </View>
                   {!!url && (
                     <Text style={[styles.linkState, !youtubeDetected && styles.invalidText]} accessibilityLiveRegion="polite">
-                      {youtubeDetected ? 'YouTube playlist detected ✓' : parsed?.source === 'spotify' ? 'Use the Spotify file method below.' : 'Enter a YouTube playlist link.'}
+                      {youtubeDetected ? 'YouTube playlist detected ✓' : parsed?.source === 'spotify' ? 'Use the Spotify file method below.' : 'No playlist found in this link.'}
                     </Text>
                   )}
                   <TouchableOpacity style={[styles.methodPrimary, !youtubeDetected && styles.buttonDisabled]} onPress={startImport} disabled={!youtubeDetected} accessibilityRole="button" accessibilityLabel="Import from YouTube">
@@ -511,6 +599,11 @@ export default function ImportPlaylistScreen() {
                 {progress?.phase === 'fetching' && progress.loaded > 0 && (
                   <Text style={styles.progressDetail}>
                     {progress.loaded}{progress.total ? ` / ${progress.total}` : ''} tracks
+                  </Text>
+                )}
+                {progress?.phase === 'matching' && (
+                  <Text style={styles.progressDetail}>
+                    {progress.matched ?? 0} matched · {progress.needsReview ?? 0} need review · {progress.unavailable ?? 0} unavailable
                   </Text>
                 )}
                 <TouchableOpacity style={styles.cancelButton} onPress={cancelActive}>
@@ -590,16 +683,19 @@ export default function ImportPlaylistScreen() {
                 <TouchableOpacity
                   style={[
                     styles.primaryButton,
-                    (phase === 'saving' || !playlistName.trim() || nameTaken || prepared.needsReview > 0 || !prepared.tracks.length) &&
+                    (phase === 'saving' || !playlistName.trim() || nameTaken || !prepared.tracks.length) &&
                       styles.buttonDisabled,
                   ]}
                   onPress={save}
-                  disabled={phase === 'saving' || !playlistName.trim() || nameTaken || prepared.needsReview > 0 || !prepared.tracks.length}
+                  disabled={phase === 'saving' || !playlistName.trim() || nameTaken || !prepared.tracks.length}
                 >
                   <Text style={styles.primaryButtonText}>
-                    {phase === 'saving' ? 'Saving…' : collision?.sameSource ? 'Create copy' : sourcePlaylist.source === 'file' ? 'Finish Import' : 'Save playlist'}
+                    {phase === 'saving' ? 'Saving…' : prepared.needsReview > 0 ? `Save ${prepared.tracks.length} matched tracks` : collision?.sameSource ? 'Create copy' : sourcePlaylist.source === 'file' ? 'Finish Import' : 'Save playlist'}
                   </Text>
                 </TouchableOpacity>
+                {prepared.needsReview > 0 && prepared.tracks.length > 0 && (
+                  <Text style={styles.notice}>Unreviewed tracks will be skipped. You can review them first or save the confirmed matches now.</Text>
+                )}
               </View>
             ) : null}
 
@@ -739,4 +835,10 @@ const styles = StyleSheet.create({
   howTitle: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary },
   chevronOpen: { transform: [{ rotate: '180deg' }] },
   howBody: { fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, color: COLORS.text.secondary, paddingHorizontal: SIZES.sm, marginBottom: SIZES.md },
+  mappingBlock: { padding: SIZES.md, marginBottom: SIZES.lg, backgroundColor: COLORS.surfaceRaised, borderRadius: SIZES.radius.md },
+  mappingSample: { color: COLORS.text.secondary, fontFamily: FONTS.regular, fontSize: 13, lineHeight: 20, marginBottom: SIZES.md },
+  mappingChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: SIZES.sm, marginBottom: SIZES.md },
+  mappingChoice: { minHeight: 48, paddingHorizontal: SIZES.md, justifyContent: 'center', borderWidth: 1, borderColor: COLORS.glassBorder, borderRadius: SIZES.radius.md },
+  mappingSelected: { borderColor: COLORS.accent.magenta, backgroundColor: COLORS.accent.magentaGlow },
+  mappingChoiceText: { color: COLORS.text.primary, fontFamily: FONTS.medium, fontSize: 14 },
 });

@@ -56,6 +56,9 @@ export class PlaylistImportEngine {
   ): Promise<SpotifyTrackMatch[]> {
     const matches: SpotifyTrackMatch[] = [];
     const cache = new Map<string, Omit<SpotifyTrackMatch, 'source'>>();
+    let matched = 0;
+    let needsReview = 0;
+    let unavailable = playlist.unavailableCount;
 
     for (let index = 0; index < playlist.tracks.length; index++) {
       if (signal.aborted) throw cancelled();
@@ -64,16 +67,25 @@ export class PlaylistImportEngine {
       if (cached) {
         matches.push({ source, ...cached });
       } else {
-        const query = `${source.title} ${source.artists.join(' ')}`.trim();
         let candidates: Track[] = [];
         try {
+          const query = `${source.title} ${source.artists.join(' ')}`.trim();
           candidates = await this.dependencies.searchTracks(query, signal);
+          let initial = matchSpotifyTrack(source, candidates);
+          if (!initial.alternatives.length && source.artists.length) {
+            const fallback = await this.dependencies.searchTracks(source.title, signal);
+            candidates = [...candidates, ...fallback.filter((track) => !candidates.some((item) => item.id === track.id))];
+            initial = matchSpotifyTrack(source, candidates);
+          }
+          if (!initial.alternatives.length && source.alternate) {
+            const fallback = await this.dependencies.searchTracks(
+              `${source.alternate.title} ${source.alternate.artists.join(' ')}`, signal
+            );
+            candidates = [...candidates, ...fallback.filter((track) => !candidates.some((item) => item.id === track.id))];
+          }
         } catch (error) {
           if (signal.aborted) throw cancelled();
-          console.warn('[playlist-import] Match search failed', {
-            sourceId: source.sourceId,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] MATCH', error instanceof Error ? error.name : 'unknown');
           throw appErrorWithMessage(
             'provider_failed',
             `Matching stopped at “${source.title}” because search is unavailable. Nothing was saved.`
@@ -98,7 +110,13 @@ export class PlaylistImportEngine {
         cache.set(source.sourceId, reusable);
         matches.push(match);
       }
-      onProgress?.({ phase: 'matching', completed: index + 1, total: playlist.tracks.length });
+      const confidence = matches[matches.length - 1].confidence;
+      if (confidence === 'HIGH') matched++;
+      else if (confidence === 'NO_MATCH') unavailable++;
+      else needsReview++;
+      if ((index + 1) % 5 === 0 || index + 1 === playlist.tracks.length) {
+        onProgress?.({ phase: 'matching', completed: index + 1, total: playlist.tracks.length, matched, needsReview, unavailable });
+      }
       // Yield between large batches so progress/cancel interactions can render.
       if ((index + 1) % 5 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }

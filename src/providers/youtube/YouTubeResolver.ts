@@ -231,7 +231,9 @@ export class YouTubeResolver implements TrackResolver {
         ? await innertube.browseContinuation(options.continuation, options.signal)
         : await innertube.browse(id, options.signal);
 
-      const sourceItems = collectShelfItems(response?.contents ?? response).flatMap(
+      // Continuation items can live beside `contents` in response actions.
+      // Traversing only `contents` silently drops pages on those responses.
+      const sourceItems = collectShelfItems(response).flatMap(
         (s) => s.items
       );
       const parsedTracks = sourceItems.map(parseTrackItem);
