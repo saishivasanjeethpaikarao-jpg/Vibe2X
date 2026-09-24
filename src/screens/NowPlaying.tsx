@@ -58,9 +58,11 @@ export default function NowPlayingScreen() {
   const reducedMotion = useReducedMotion();
   const {
     currentTrack,
+    pendingTrack,
+    transitionState,
+    transitionFeedback,
     isPlaying,
     togglePlayPause,
-    isLoading,
     isBuffering,
     error,
     retry,
@@ -115,15 +117,18 @@ export default function NowPlayingScreen() {
   };
 
   const artworkStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
-  if (!currentTrack) return null;
+  const shownTrack = currentTrack ?? (transitionFeedback !== 'hidden' ? pendingTrack : null);
+  if (!shownTrack) return null;
 
-  const liked = isLiked(currentTrack.id);
-  const busy = isLoading || isBuffering;
+  const liked = currentTrack ? isLiked(currentTrack.id) : false;
+  const transitioning = transitionState === 'resolving' || transitionState === 'preparing' || transitionState === 'buffering';
+  const busy = transitionFeedback === 'preparing' || transitionFeedback === 'long';
+  const pendingMessage = transitionFeedback === 'long' ? 'Taking a little longer…' : 'Getting your next vibe…';
   const artworkSize = Math.min(width - SIZES.lg * 2, 420);
 
   return (
     <View style={styles.container}>
-      <ArtworkAtmosphere artworkUrl={currentTrack.albumImageUrl} intensity="hero" />
+      <ArtworkAtmosphere artworkUrl={shownTrack.albumImageUrl} intensity="hero" />
       <ScrollView
         contentContainerStyle={[
           styles.content,
@@ -141,12 +146,13 @@ export default function NowPlayingScreen() {
             <ChevronDown color={THEME.text.primary} size={26} />
           </TouchableOpacity>
           <View style={styles.headerCopy}>
-            <Text style={styles.sourceLabel}>Playing from</Text>
-            <Text style={styles.sourceTitle} numberOfLines={1}>{currentTrack.isAutoSuggested ? 'Smart Continue' : queueContext || 'Vibe2X'}</Text>
+            <Text style={styles.sourceLabel}>{currentTrack ? 'Playing from' : 'Preparing'}</Text>
+            <Text style={styles.sourceTitle} numberOfLines={1}>{shownTrack.isAutoSuggested ? 'Smart Continue' : queueContext || 'Vibe2X'}</Text>
           </View>
           <TouchableOpacity
             style={styles.headerButton}
-            onPress={() => setAddingTrack(currentTrack)}
+            onPress={() => currentTrack && setAddingTrack(currentTrack)}
+            disabled={!currentTrack}
             accessibilityRole="button"
             accessibilityLabel="Add track to playlist"
           >
@@ -167,21 +173,22 @@ export default function NowPlayingScreen() {
             ]}
           >
             <Image
-              source={{ uri: currentTrack.albumImageUrl }}
+              source={{ uri: shownTrack.albumImageUrl }}
               style={styles.artwork}
-              accessibilityLabel={`Artwork for ${currentTrack.title}`}
+              accessibilityLabel={`Artwork for ${shownTrack.title}`}
             />
           </Animated.View>
         </PanGestureHandler>
 
         <View style={styles.trackInfo}>
           <View style={styles.trackCopy}>
-            <Text style={styles.trackTitle} numberOfLines={2}>{currentTrack.title}</Text>
-            <Text style={styles.trackArtist} numberOfLines={1}>{currentTrack.artist.name}</Text>
+            <Text style={styles.trackTitle} numberOfLines={2}>{shownTrack.title}</Text>
+            <Text style={styles.trackArtist} numberOfLines={1}>{shownTrack.artist.name}</Text>
           </View>
           <TouchableOpacity
             style={styles.iconButton}
             onPress={async () => {
+              if (!currentTrack) return;
               const wasLiked = isLiked(currentTrack.id);
               try {
                 const saved = await confirmLocalMutation(
@@ -196,6 +203,7 @@ export default function NowPlayingScreen() {
             accessibilityRole="button"
             accessibilityLabel={liked ? 'Remove from liked songs' : 'Add to liked songs'}
             accessibilityState={{ selected: liked }}
+            disabled={!currentTrack}
           >
             <Heart
               color={liked ? THEME.accent.secondary : THEME.text.primary}
@@ -205,19 +213,31 @@ export default function NowPlayingScreen() {
           </TouchableOpacity>
         </View>
 
+        {(pendingTrack || (isBuffering && currentTrack)) && busy && (
+          <View style={styles.transitionBanner} accessibilityLiveRegion="polite">
+            <ActivityIndicator size="small" color={THEME.accent.secondary} />
+            <View style={styles.transitionCopy}>
+              <Text style={styles.transitionTitle} numberOfLines={1}>Preparing {pendingTrack?.title ?? currentTrack?.title}</Text>
+              <Text style={styles.transitionHint}>{pendingMessage}</Text>
+            </View>
+          </View>
+        )}
+
         <SeekBar onSeek={seekTo} />
 
         {error && (
-          <TouchableOpacity
-            activeOpacity={0.82}
-            onPress={retry}
-            style={styles.errorBanner}
-            accessibilityRole="button"
-            accessibilityLabel={`${error}. Tap to retry playback.`}
-          >
-            <Text style={styles.errorText} numberOfLines={2}>{error}</Text>
-            <Text style={styles.errorHint}>Tap to retry</Text>
-          </TouchableOpacity>
+          <View style={styles.errorBanner} accessibilityLiveRegion="polite">
+            <Text style={styles.errorText}>Couldn't play this song</Text>
+            <Text style={styles.errorHint} numberOfLines={2}>{error}</Text>
+            <View style={styles.errorActions}>
+              <TouchableOpacity onPress={retry} accessibilityRole="button" accessibilityLabel="Retry song" style={styles.errorAction}>
+                <Text style={styles.errorActionText}>Retry</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={next} accessibilityRole="button" accessibilityLabel="Skip song" style={styles.errorAction}>
+                <Text style={styles.errorActionText}>Skip</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         )}
 
         <View style={styles.transport}>
@@ -234,9 +254,11 @@ export default function NowPlayingScreen() {
             <SkipBack color={THEME.text.primary} size={30} fill={THEME.text.primary} />
           </TouchableOpacity>
           <PressableScale
-            onPress={togglePlayPause}
+            onPress={transitionState === 'failed' ? retry : togglePlayPause}
             accessibilityRole="button"
-            accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
+            accessibilityLabel={transitionState === 'failed' ? 'Retry song' : transitioning ? 'Preparing song' : isPlaying ? 'Pause' : 'Play'}
+            accessibilityState={{ disabled: transitioning, busy }}
+            disabled={transitioning}
             contentStyle={styles.playButton}
             pressedScale={0.96}
           >
@@ -406,6 +428,13 @@ const styles = StyleSheet.create({
   },
   errorText: { fontFamily: FONTS.medium, fontSize: 13, color: THEME.text.primary },
   errorHint: { marginTop: 2, fontFamily: FONTS.regular, fontSize: 12, color: THEME.text.secondary },
+  errorActions: { flexDirection: 'row', gap: SIZES.md, marginTop: SIZES.sm },
+  errorAction: { minWidth: 64, minHeight: 48, justifyContent: 'center', alignItems: 'center' },
+  errorActionText: { fontFamily: FONTS.medium, fontSize: 14, color: THEME.text.primary },
+  transitionBanner: { flexDirection: 'row', alignItems: 'center', gap: SIZES.sm, marginBottom: SIZES.md, padding: SIZES.sm, borderRadius: SIZES.radius.sm, backgroundColor: THEME.surface.interactive },
+  transitionCopy: { flex: 1 },
+  transitionTitle: { fontFamily: FONTS.medium, fontSize: 14, color: THEME.text.primary },
+  transitionHint: { marginTop: 2, fontFamily: FONTS.regular, fontSize: 12, color: THEME.text.secondary },
   upNext: {
     marginTop: SIZES.md,
     padding: SIZES.md,

@@ -49,7 +49,7 @@ export default function LibraryScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation<NativeStackNavigationProp<LibraryStackParams>>();
   const [activeFilter, setActiveFilter] = useState('Playlists');
-  const { playTrack, currentTrack, isPlaying, togglePlayPause, isLoading, next } = usePlayer();
+  const { playTrack, currentTrack, isPlaying, togglePlayPause, next } = usePlayer();
   const {
     playlists,
     likedPlaylist,
@@ -395,18 +395,14 @@ export default function LibraryScreen() {
 
       <StatusBarScrim />
 
-      {currentTrack && (
-        <MiniPlayer
-          track={currentTrack}
-            isPlaying={isPlaying}
-          
-          isLoading={isLoading}
-          onPlayPause={togglePlayPause}
-          onNext={next}
-          onPress={() => navigation.navigate('NowPlaying')}
-          tabBarHeight={tabBarHeight}
-        />
-      )}
+      <MiniPlayer
+        track={currentTrack}
+        isPlaying={isPlaying}
+        onPlayPause={togglePlayPause}
+        onNext={next}
+        onPress={() => navigation.navigate('NowPlaying')}
+        tabBarHeight={tabBarHeight}
+      />
     </View>
   );
 }

@@ -372,16 +372,14 @@ export default function SearchScreen() {
 
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
 
-      {currentTrack && (
-        <MiniPlayer
-          track={currentTrack}
-          isPlaying={isPlaying}
-          onPlayPause={togglePlayPause}
-          onNext={next}
-          onPress={() => navigation.navigate('NowPlaying' as never)}
-          tabBarHeight={tabBarHeight}
-        />
-      )}
+      <MiniPlayer
+        track={currentTrack}
+        isPlaying={isPlaying}
+        onPlayPause={togglePlayPause}
+        onNext={next}
+        onPress={() => navigation.navigate('NowPlaying' as never)}
+        tabBarHeight={tabBarHeight}
+      />
     </View>
   );
 }

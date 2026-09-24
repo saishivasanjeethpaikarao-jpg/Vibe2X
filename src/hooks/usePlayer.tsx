@@ -8,18 +8,29 @@ import React, {
   useState,
   ReactNode,
 } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AccessibilityInfo, AppState, Platform } from 'react-native';
 import { AppError, messageFor, toAppError } from '../core/errors';
 import { RepeatMode, Track } from '../core/types';
 import { flushWrites, readJson, writeJsonDebounced, STORAGE_KEYS } from '../core/storage';
 import { playbackEngine, IDLE_STATUS, PlaybackStatus } from '../playback/PlaybackEngine';
-import { Queue, QueueSnapshot, EMPTY_QUEUE } from '../playback/queue';
+import { Queue, QueueEntry, QueueSnapshot, EMPTY_QUEUE } from '../playback/queue';
 import { preloader } from '../playback/preload';
 import { endpointSource } from '../providers/stream/StreamResolver';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 import { getSuppressedTrackIds, getRecentTrackIds } from '../core/lie';
 import { AutoContinueManager, RecommendationSignals } from '../playback/AutoContinueManager';
+import {
+  feedbackFor,
+  LONG_WAIT_FEEDBACK_MS,
+  PlaybackTransition,
+  PREPARING_FEEDBACK_MS,
+  shouldSkipFailedCandidate,
+  TransitionFeedback,
+  TransitionState,
+} from '../playback/transition';
+import { PlaybackTiming } from '../playback/timing';
+import { streamResolver } from '../providers/stream/StreamResolver';
 
 type PlayerContextType = {
   // --- core player state used by every screen ---
@@ -53,12 +64,15 @@ type PlayerContextType = {
 
   queue: Track[];
   upcoming: Track[];
+  upcomingEntries: QueueEntry[];
   manualUpcoming: Track[];
   contextUpcoming: Track[];
   autoUpcoming: Track[];
   queueContext: string;
   isPreparingAuto: boolean;
   pendingTrack: Track | null;
+  transitionState: TransitionState;
+  transitionFeedback: TransitionFeedback;
   addToQueue: (tracks: Track | Track[]) => boolean;
   playNext: (tracks: Track | Track[]) => void;
   removeFromQueue: (trackId: string) => void;
@@ -126,6 +140,15 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   statusRef.current = status;
   const [isLoading, setIsLoading] = useState(false);
   const [pendingTrack, setPendingTrack] = useState<Track | null>(null);
+  const [transitionState, setTransitionState] = useState<TransitionState>('idle');
+  const [transitionFeedback, setTransitionFeedback] = useState<TransitionFeedback>('hidden');
+  const transition = useRef(new PlaybackTransition());
+  const feedbackTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const bufferingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const bufferingSince = useRef<number | null>(null);
+  const activeTiming = useRef<PlaybackTiming | null>(null);
+  const nextIntent = useRef(0);
+  const failureActive = useRef(false);
   const transitioning = useRef(false);
   const [isPreparingAuto, setIsPreparingAuto] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +177,44 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const historyWrittenFor = useRef<number | null>(null);
 
   const bumpQueue = useCallback(() => setQueueVersion((v) => v + 1), []);
+
+  const clearFeedbackTimers = useCallback(() => {
+    feedbackTimers.current.forEach(clearTimeout);
+    feedbackTimers.current = [];
+  }, []);
+
+  const clearBufferingTimers = useCallback(() => {
+    bufferingTimers.current.forEach(clearTimeout);
+    bufferingTimers.current = [];
+    bufferingSince.current = null;
+  }, []);
+
+  const startFeedbackTimers = useCallback((id: number) => {
+    clearFeedbackTimers();
+    setTransitionFeedback('hidden');
+    feedbackTimers.current = [
+      setTimeout(() => {
+        if (transition.current.isCurrent(id) && transition.current.isPending) {
+          setTransitionFeedback(feedbackFor('resolving', PREPARING_FEEDBACK_MS));
+        }
+      }, PREPARING_FEEDBACK_MS),
+      setTimeout(() => {
+        if (transition.current.isCurrent(id) && transition.current.isPending) {
+          setTransitionFeedback(feedbackFor('resolving', LONG_WAIT_FEEDBACK_MS));
+        }
+      }, LONG_WAIT_FEEDBACK_MS),
+    ];
+  }, [clearFeedbackTimers]);
+
+  useEffect(() => {
+    if (transitionFeedback === 'hidden') return;
+    const message = transitionFeedback === 'failed'
+      ? "Couldn't play this song. Retry or skip."
+      : transitionFeedback === 'long'
+        ? 'Taking a little longer…'
+        : 'Getting your next vibe…';
+    AccessibilityInfo.announceForAccessibility(message);
+  }, [transitionFeedback]);
 
   const persistQueue = useCallback(() => {
     writeJsonDebounced(STORAGE_KEYS.queue, queueRef.current.snapshot(), 600);
@@ -215,9 +276,20 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   // ---- loading a track --------------------------------------------------
 
   const loadCurrent = useCallback(
-    async (options: { autoPlay?: boolean; startPosition?: number } = {}) => {
+    async (options: { autoPlay?: boolean; startPosition?: number; intentAt?: number } = {}) => {
       const track = queueRef.current.current;
       if (!track) {
+        failureActive.current = false;
+        loadAbort.current?.abort();
+        activeTiming.current?.finish('superseded');
+        activeTiming.current = null;
+        loadingTrackId.current = null;
+        transition.current.reset();
+        clearFeedbackTimers();
+        clearBufferingTimers();
+        setTransitionState('idle');
+        setTransitionFeedback('hidden');
+        setPendingTrack(null);
         transitioning.current = false;
         setCurrentTrack(null);
         setIsLoading(false);
@@ -225,8 +297,13 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         return;
       }
 
-      const id = ++loadId.current;
+      const id = transition.current.begin(track.id);
+      if (id === null) return; // repeated tap on the same resolving selection
+      failureActive.current = false;
+      clearBufferingTimers();
+      loadId.current = id;
       transitioning.current = true;
+      activeTiming.current?.finish('superseded');
 
       // Only abort the previous load if it was for a DIFFERENT track. Aborting
       // a load of this same track would kill the shared in-flight resolve that
@@ -239,7 +316,12 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       loadAbort.current = controller;
       loadingTrackId.current = track.id;
 
-      const preloadedThis = preloader.pending === track.id;
+      const preloadedThis = preloader.pending === track.id || Boolean(streamResolver.peek(track));
+      const timing = new PlaybackTiming(preloadedThis, Date.now, options.intentAt);
+      activeTiming.current = timing;
+      timing.mark('resolverStart');
+      startFeedbackTimers(id);
+      setTransitionState('resolving');
 
       // Stop warming anything that is no longer next -- but if we were warming
       // THIS track, adopt that request instead of aborting it: resolveStream
@@ -260,11 +342,32 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
       try {
         const stream = await MusicService.resolveStream(track, controller.signal);
-        if (id !== loadId.current) return; // superseded by a newer load
+        if (!transition.current.isCurrent(id)) return; // superseded by a newer load
+        timing.mark('resolverComplete');
+        transition.current.advance(id, 'preparing');
+        setTransitionState('preparing');
 
-        await playbackEngine.load(track, stream, { ...options, isCurrent: () => id === loadId.current });
-        if (id !== loadId.current) return;
+        await playbackEngine.load(track, stream, {
+          autoPlay: options.autoPlay,
+          startPosition: options.startPosition,
+          isCurrent: () => transition.current.isCurrent(id),
+          onMilestone: (stage) => {
+            if (!transition.current.isCurrent(id)) return;
+            timing.mark(stage);
+            if (stage === 'nativeLoadStart' || stage === 'nativeReady') {
+              transition.current.advance(id, 'buffering');
+              setTransitionState('buffering');
+            }
+          },
+        });
+        if (!transition.current.isCurrent(id)) return;
 
+        timing.finish('playing');
+        activeTiming.current = null;
+        clearFeedbackTimers();
+        transition.current.advance(id, options.autoPlay === false ? 'paused' : 'playing');
+        setTransitionState(options.autoPlay === false ? 'paused' : 'playing');
+        setTransitionFeedback('hidden');
         setCurrentTrack(track);
         confirmedTrack.current = track;
         transitioning.current = false;
@@ -287,13 +390,15 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         preloader.schedule(queueRef.current.peekNext());
         void fillAuto();
       } catch (e) {
-        if (id !== loadId.current) return;
+        if (!transition.current.isCurrent(id)) return;
 
         // Always leave the loading state, whatever went wrong.
+        timing.finish('failed');
+        activeTiming.current = null;
+        clearFeedbackTimers();
         transitioning.current = false;
         setStatus({ ...playbackEngine.getStatus(), isBuffering: false, isPlaying: false });
         setIsLoading(false);
-        setPendingTrack(null);
         loadingTrackId.current = null;
         const err = toAppError(e, 'playback_failed');
         if (__DEV__) console.log('[playback] FAILED', track.title, '|', err.kind, '|', err.detail ?? '');
@@ -306,25 +411,28 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         // A track that simply cannot play should not strand the queue: step
         // over it and keep going. Network failures are NOT skipped -- the
         // next track would fail identically, so the error is shown instead.
-        const skippable = err.kind === 'track_unavailable' ||
-          err.kind === 'region_restricted' ||
-          err.kind === 'source_unavailable';
-
-        if (skippable && autoSkips.current < MAX_AUTO_SKIPS && queueRef.current.hasNext) {
+        if (shouldSkipFailedCandidate(
+          err.kind, Boolean(track.isAutoSuggested), queueRef.current.hasNext,
+          autoSkips.current, MAX_AUTO_SKIPS
+        )) {
           autoSkips.current += 1;
           if (__DEV__) console.log('[playback] auto-skip', autoSkips.current, 'past', track.title);
           queueRef.current.next(false);
           bumpQueue();
           persistQueue();
-          void loadCurrent({ autoPlay: true });
+          void loadCurrent({ autoPlay: true, intentAt: options.intentAt });
           return;
         }
 
         autoSkips.current = 0;
+        failureActive.current = true;
+        transition.current.advance(id, 'failed');
+        setTransitionState('failed');
+        setTransitionFeedback('failed');
         setError(messageFor(err));
       }
     },
-    [bumpQueue, persistQueue, fillAuto]
+    [bumpQueue, persistQueue, fillAuto, clearFeedbackTimers, clearBufferingTimers, startFeedbackTimers]
   );
 
   // ---- engine wiring ----------------------------------------------------
@@ -332,7 +440,30 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   useEffect(() => {
     playbackEngine.on('onStatus', (s) => {
       statusRef.current = s;
-      if (!transitioning.current) setStatus(s);
+      if (!transitioning.current) {
+        setStatus(s);
+        if (!failureActive.current) {
+          setTransitionState(s.isPlaying ? 'playing' : s.isBuffering ? 'buffering' : s.isLoaded ? 'paused' : 'idle');
+        }
+        if (!failureActive.current && s.isBuffering && !s.isPlaying && bufferingSince.current === null) {
+          bufferingSince.current = Date.now();
+          bufferingTimers.current = [
+            setTimeout(() => {
+              if (bufferingSince.current !== null && !transitioning.current) {
+                setTransitionFeedback('preparing');
+              }
+            }, PREPARING_FEEDBACK_MS),
+            setTimeout(() => {
+              if (bufferingSince.current !== null && !transitioning.current) {
+                setTransitionFeedback('long');
+              }
+            }, LONG_WAIT_FEEDBACK_MS),
+          ];
+        } else if ((!s.isBuffering || s.isPlaying) && bufferingSince.current !== null) {
+          clearBufferingTimers();
+          setTransitionFeedback('hidden');
+        }
+      }
     });
 
     playbackEngine.on('onComplete', () => {
@@ -362,11 +493,20 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     playbackEngine.on('onError', (e) => {
       if (transitioning.current) return;
+      clearBufferingTimers();
+      failureActive.current = true;
       setIsLoading(false);
+      setTransitionState('failed');
+      setTransitionFeedback('failed');
+      setPendingTrack(confirmedTrack.current);
       setError(messageFor(e instanceof AppError ? e : toAppError(e, 'playback_failed')));
     });
 
     return () => {
+      clearFeedbackTimers();
+      clearBufferingTimers();
+      activeTiming.current?.finish('superseded');
+      transition.current.reset();
       preloader.cancel();
       void playbackEngine.release();
     };
@@ -406,6 +546,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             if (cancelled) return;
 
             setCurrentTrack(restored);
+            setTransitionState('paused');
             confirmedTrack.current = restored;
             lastAttempt.current = {
               track: restored,
@@ -479,6 +620,9 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const playTrack = useCallback(
     (track: Track, context?: { tracks?: Track[]; label?: string; candidates?: Track[]; query?: string }) => {
+      if (transitioning.current && loadingTrackId.current === track.id) return;
+      nextIntent.current++;
+      const intentAt = Date.now();
       autoSession.current++;
       autoFill.current = null;
       autoManager.current.start(track, context?.candidates, context?.query);
@@ -497,13 +641,14 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       bumpQueue();
       persistQueue();
 
-      void loadCurrent({ autoPlay: true });
+      void loadCurrent({ autoPlay: true, intentAt });
       void fillAuto();
     },
     [bumpQueue, fillAuto, loadCurrent, persistQueue, signals]
   );
 
   const togglePlayPause = useCallback(() => {
+    if (transitioning.current) return;
     const track = queueRef.current.current ?? currentTrack;
     if (!track) return;
 
@@ -525,21 +670,36 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, [bumpQueue, currentTrack, loadCurrent, status.isPlaying]);
 
   const next = useCallback(async () => {
+    const intent = ++nextIntent.current;
+    const intentAt = Date.now();
     if (!transitioning.current && statusRef.current.isPlaying && statusRef.current.position > 0 && statusRef.current.position < 10 && confirmedTrack.current) {
       sessionSkippedIds.current.add(confirmedTrack.current.id);
     }
     const session = autoSession.current;
     if (!queueRef.current.peekNext() && !queueRef.current.hasNext) await fillAuto();
-    if (session !== autoSession.current) return;
+    if (session !== autoSession.current || intent !== nextIntent.current) return;
     const nextTrack = queueRef.current.next(false);
     bumpQueue();
     persistQueue();
 
     if (!nextTrack) return;
-    void loadCurrent({ autoPlay: true });
+    // Consecutive presses in one JS turn coalesce into the latest selection.
+    Promise.resolve().then(() => {
+      if (intent === nextIntent.current) void loadCurrent({ autoPlay: true, intentAt });
+    });
   }, [bumpQueue, fillAuto, loadCurrent, persistQueue]);
 
   const previous = useCallback(() => {
+    nextIntent.current++;
+    if (transitioning.current) {
+      const previousTrack = queueRef.current.previous();
+      if (previousTrack) {
+        bumpQueue();
+        persistQueue();
+        void loadCurrent({ autoPlay: true, intentAt: Date.now() });
+      }
+      return;
+    }
     // Standard behaviour: restart the track if we are more than 3s in.
     if (statusRef.current.position > 3) {
       void playbackEngine.seekTo(0);
@@ -610,12 +770,19 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const attempt = lastAttempt.current;
     if (!attempt) return;
 
+    nextIntent.current++;
     setError(null);
     MusicService.invalidateStream(attempt.track);
     void loadCurrent({ autoPlay: true, startPosition: attempt.position });
   }, [loadCurrent]);
 
-  const clearError = useCallback(() => setError(null), []);
+  const clearError = useCallback(() => {
+    failureActive.current = false;
+    setError(null);
+    setTransitionFeedback('hidden');
+    setPendingTrack(null);
+    setTransitionState(playbackEngine.getStatus().isPlaying ? 'playing' : 'paused');
+  }, []);
 
   // ---- queue operations -------------------------------------------------
 
@@ -662,10 +829,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       // Removing the playing track slides the next one into its place.
       if (removedCurrent) {
         if (queueRef.current.current) void loadCurrent({ autoPlay: true });
-        else {
-          playbackEngine.stop();
-          setCurrentTrack(null);
-        }
+        else void loadCurrent();
       }
     },
     [bumpQueue, loadCurrent, persistQueue]
@@ -698,6 +862,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const track = queueRef.current.jumpTo(trackId);
       if (!track) return;
 
+      nextIntent.current++;
       bumpQueue();
       persistQueue();
       void loadCurrent({ autoPlay: true });
@@ -724,6 +889,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     () => ({
       items: queueRef.current.items,
       upcoming: queueRef.current.upcoming,
+      upcomingEntries: queueRef.current.upcomingEntries,
       manualUpcoming: queueRef.current.manualUpcoming,
       contextUpcoming: queueRef.current.contextUpcoming,
       autoUpcoming: queueRef.current.autoUpcoming,
@@ -774,12 +940,15 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
       queue: queueSnapshot.items,
       upcoming: queueSnapshot.upcoming,
+      upcomingEntries: queueSnapshot.upcomingEntries,
       manualUpcoming: queueSnapshot.manualUpcoming,
       contextUpcoming: queueSnapshot.contextUpcoming,
       autoUpcoming: queueSnapshot.autoUpcoming,
       queueContext: queueSnapshot.context,
       isPreparingAuto: queueSnapshot.isPreparingAuto,
       pendingTrack: queueSnapshot.pendingTrack,
+      transitionState,
+      transitionFeedback,
       addToQueue,
       playNext: playNextInQueue,
       removeFromQueue,
@@ -817,6 +986,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       next,
       previous,
       queueSnapshot,
+      transitionState,
+      transitionFeedback,
       addToQueue,
       playNextInQueue,
       removeFromQueue,

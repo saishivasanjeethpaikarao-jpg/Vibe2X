@@ -36,6 +36,47 @@ describe('Queue', () => {
     expect(queue.length).toBe(2);
   });
 
+  it('projects only the active item away: A current, B manual is visible', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    queue.add(mockTrack('B'));
+    expect(queue.current?.id).toBe('A');
+    expect(queue.upcomingEntries.map(({ track, origin }) => [track.id, origin]))
+      .toEqual([['B', 'manual']]);
+  });
+
+  it('projects Smart Continue and manual items in the actual play order', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    queue.add([mockTrack('B', { isAutoSuggested: true }), mockTrack('C', { isAutoSuggested: true })]);
+    expect(queue.upcomingEntries.map(({ track, origin }) => [track.id, origin]))
+      .toEqual([['B', 'smartContinue'], ['C', 'smartContinue']]);
+    queue.add(mockTrack('X'));
+    expect(queue.upcomingEntries.map(({ track, origin }) => [track.id, origin]))
+      .toEqual([['X', 'manual'], ['B', 'smartContinue'], ['C', 'smartContinue']]);
+  });
+
+  it('updates the visible projection immediately after mutation and advancement', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    expect(queue.upcomingEntries).toEqual([]);
+    queue.add(mockTrack('B'));
+    expect(queue.upcomingEntries.map((entry) => entry.track.id)).toEqual(['B']);
+    expect(queue.next(true)?.id).toBe('B');
+    expect(queue.upcomingEntries).toEqual([]);
+  });
+
+  it('keeps entry origins and order after reloading a queue snapshot', () => {
+    const before = new Queue();
+    before.setTracks([mockTrack('A'), mockTrack('P')], 0, 'Playlist');
+    before.add(mockTrack('S', { isAutoSuggested: true }));
+    before.add(mockTrack('M'));
+    const after = new Queue();
+    after.restore(before.snapshot());
+    expect(after.upcomingEntries.map(({ track, origin }) => [track.id, origin]))
+      .toEqual([['M', 'manual'], ['P', 'context'], ['S', 'smartContinue']]);
+  });
+
   it('multiple queue additions preserve order', () => {
     const queue = new Queue();
     queue.setTracks([mockTrack('A')]);

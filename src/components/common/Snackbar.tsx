@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { StyleSheet, Text, View, Pressable, AccessibilityInfo } from 'react-native';
+import { StyleSheet, Text, View, Pressable, AccessibilityInfo, Platform } from 'react-native';
+import { FullWindowOverlay } from 'react-native-screens';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -8,6 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { THEME, SIZES, FONTS, MOTION } from '../../constants/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { usePlayer } from '../../hooks/usePlayer';
 
 interface SnackbarProps {
   visible: boolean;
@@ -20,6 +22,7 @@ interface SnackbarProps {
 
 export const Snackbar: React.FC<SnackbarProps> = ({ visible, message, action }) => {
   const insets = useSafeAreaInsets();
+  const { currentTrack } = usePlayer();
   const reducedMotion = useReducedMotion();
   const opacity = useSharedValue(0);
   const translateY = useSharedValue(20);
@@ -58,9 +61,11 @@ export const Snackbar: React.FC<SnackbarProps> = ({ visible, message, action }) 
     };
   });
 
-  return (
+  const toast = (
     <Animated.View
-      style={[styles.container, { bottom: Math.max(SIZES.bottomInset, insets.bottom + SIZES.lg) }, animatedStyle]}
+      // On tab screens the mini-player sits above the bottom bar. The previous
+      // bottom inset placed this message underneath both, making it invisible.
+      style={[styles.container, { bottom: insets.bottom + (currentTrack ? 158 : 76) }, animatedStyle]}
       pointerEvents={visible ? 'box-none' : 'none'}
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
@@ -82,6 +87,14 @@ export const Snackbar: React.FC<SnackbarProps> = ({ visible, message, action }) 
       </View>
     </Animated.View>
   );
+
+  // Native-stack modal screens can sit above their React parent on iOS.
+  // This host stays above those screens without opening a touch-blocking Modal.
+  return Platform.OS === 'ios' ? (
+    <FullWindowOverlay>
+      <View style={StyleSheet.absoluteFill} pointerEvents="box-none">{toast}</View>
+    </FullWindowOverlay>
+  ) : toast;
 };
 
 const styles = StyleSheet.create({
@@ -90,6 +103,7 @@ const styles = StyleSheet.create({
     left: SIZES.md,
     right: SIZES.md,
     zIndex: 999,
+    elevation: 999,
   },
   content: {
     flexDirection: 'row',

@@ -1,5 +1,10 @@
 import { RepeatMode, Track } from '../core/types';
 
+export type QueueEntry = {
+  track: Track;
+  origin: 'manual' | 'context' | 'smartContinue';
+};
+
 export type QueueSnapshot = {
   /** Tracks in their original (unshuffled) order. */
   tracks: Track[];
@@ -49,6 +54,21 @@ export class Queue {
   /** Upcoming tracks in the order they will actually play. */
   get upcoming(): Track[] {
     return this.order.slice(this.position + 1).map((i) => this.tracks[i]);
+  }
+
+  /** Ordered UI projection from the same play order consumed by next(). */
+  get upcomingEntries(): QueueEntry[] {
+    return this.order.slice(this.position + 1).map((index) => {
+      const track = this.tracks[index];
+      return {
+        track,
+        origin: track.isAutoSuggested
+          ? 'smartContinue' as const
+          : this.contextTrackIds.has(track.id)
+            ? 'context' as const
+            : 'manual' as const,
+      };
+    });
   }
 
   get manualUpcoming(): Track[] {

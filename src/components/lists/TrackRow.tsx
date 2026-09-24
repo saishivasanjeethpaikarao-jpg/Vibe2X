@@ -49,7 +49,7 @@ const TrackRowComponent: React.FC<TrackRowProps> = ({
 
   const onSwipeableOpen = (direction: 'left' | 'right') => {
     if (onSwipeRight && direction === 'right') {
-      if (addFromQueueSwipe(direction, track, onSwipeRight)) show('Added to queue');
+      addFromQueueSwipe(direction, track, onSwipeRight, show);
       ReanimatedSwipeableRef.current?.close();
     }
   };

@@ -10,6 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronDown, Music, Search, ListPlus, Sparkles, GripVertical } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS, THEME } from '../constants/theme';
 import { Track } from '../core/types';
+import { QueueEntry } from '../playback/queue';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { useNavigation } from '@react-navigation/native';
@@ -19,7 +20,7 @@ import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 type QueueItem =
   | { type: 'header'; id: string; title: string }
-  | { type: 'track'; id: string; track: Track; originalIndex: number };
+  | { type: 'track'; id: string; track: Track; origin: QueueEntry['origin']; originalIndex: number };
 
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
@@ -27,10 +28,7 @@ export default function QueueScreen() {
   const { createPlaylist, settings } = useLibrary();
   const {
     currentTrack,
-    upcoming,
-    manualUpcoming,
-    contextUpcoming,
-    autoUpcoming,
+    upcomingEntries,
     queueContext,
     jumpTo,
     removeFromQueue,
@@ -38,28 +36,27 @@ export default function QueueScreen() {
     reorderQueue,
     isPreparingAuto,
     pendingTrack,
+    transitionFeedback,
   } = usePlayer();
 
   const queueData = useMemo(() => {
     const data: QueueItem[] = [];
-    let trackIndex = 0;
-    if (manualUpcoming.length > 0) {
-      data.push({ type: 'header', id: 'header-manual', title: 'Up next' });
-      data.push(...manualUpcoming.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
-    }
-    if (contextUpcoming.length > 0) {
-      data.push({ type: 'header', id: 'header-context', title: queueContext ? `Playing next from ${queueContext}` : 'Playing next' });
-      data.push(...contextUpcoming.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
-    }
-    if (autoUpcoming.length > 0) {
-      data.push({ type: 'header', id: 'header-auto', title: 'Smart Continue' });
-      data.push(...autoUpcoming.map(t => ({ type: 'track' as const, id: `track-${t.id}`, track: t, originalIndex: trackIndex++ })));
-    }
+    let previousOrigin: QueueEntry['origin'] | null = null;
+    upcomingEntries.forEach((entry, originalIndex) => {
+      if (entry.origin !== previousOrigin) {
+        const title = entry.origin === 'manual' ? 'Up next'
+          : entry.origin === 'context' ? (queueContext ? `Playing next from ${queueContext}` : 'Playing next')
+            : 'Smart Continue';
+        data.push({ type: 'header', id: `header-${entry.origin}-${originalIndex}`, title });
+        previousOrigin = entry.origin;
+      }
+      data.push({ type: 'track', id: `track-${entry.track.id}`, track: entry.track, origin: entry.origin, originalIndex });
+    });
     return data;
-  }, [manualUpcoming, contextUpcoming, autoUpcoming, queueContext]);
-  const manualCount = manualUpcoming.length;
-  const contextCount = contextUpcoming.length;
-  const contextIds = useMemo(() => new Set(contextUpcoming.map((track) => track.id)), [contextUpcoming]);
+  }, [upcomingEntries, queueContext]);
+  const manualCount = upcomingEntries.filter((entry) => entry.origin === 'manual').length;
+  const contextCount = upcomingEntries.filter((entry) => entry.origin === 'context').length;
+  const autoCount = upcomingEntries.filter((entry) => entry.origin === 'smartContinue').length;
 
   const renderRightActions = (item: Track) => {
     return (
@@ -86,12 +83,11 @@ export default function QueueScreen() {
       );
     }
 
-    const { track, originalIndex } = item;
-    const isAuto = track.isAutoSuggested;
-
-    const isContext = contextIds.has(track.id);
+    const { track, origin, originalIndex } = item;
+    const isAuto = origin === 'smartContinue';
+    const isContext = origin === 'context';
     const firstInSection = isAuto ? manualCount + contextCount : isContext ? manualCount : 0;
-    const lastInSection = isAuto ? upcoming.length - 1 : isContext ? manualCount + contextCount - 1 : manualCount - 1;
+    const lastInSection = isAuto ? upcomingEntries.length - 1 : isContext ? manualCount + contextCount - 1 : manualCount - 1;
     const reorderActions = [
       ...(originalIndex > firstInSection ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
       ...(originalIndex >= 0 && originalIndex < lastInSection
@@ -180,16 +176,16 @@ export default function QueueScreen() {
           <View style={styles.headerCenter}>
             <Text style={styles.headerSub}>PLAYING FROM</Text>
             <Text style={styles.headerTitle} numberOfLines={1}>
-              {currentTrack?.isAutoSuggested ? 'Smart Continue' : queueContext || 'Vibe2X'}
+              {currentTrack?.isAutoSuggested && autoCount > 0 ? 'Smart Continue' : queueContext || 'Vibe2X'}
             </Text>
           </View>
-          {manualCount > 0 || upcoming.length > 0 ? (
+          {upcomingEntries.length > 0 ? (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <TouchableOpacity
                 style={styles.headerIcon}
                 onPress={() => {
                   if (currentTrack) {
-                    createPlaylist(`Queue • ${new Date().toLocaleDateString()}`, [currentTrack, ...upcoming]);
+                    createPlaylist(`Queue • ${new Date().toLocaleDateString()}`, [currentTrack, ...upcomingEntries.map((entry) => entry.track)]);
                   }
                 }}
                 hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
@@ -234,14 +230,20 @@ export default function QueueScreen() {
           </View>
         )}
 
-        {pendingTrack && pendingTrack.id !== currentTrack?.id && (
-          <Text style={styles.sectionLabel}>Preparing {pendingTrack.title}…</Text>
+        {pendingTrack && transitionFeedback !== 'hidden' && pendingTrack.id !== currentTrack?.id && (
+          <Text style={styles.sectionLabel} accessibilityLiveRegion="polite">
+            {transitionFeedback === 'failed'
+              ? `Couldn't play ${pendingTrack.title}`
+              : transitionFeedback === 'long'
+                ? `Taking a little longer with ${pendingTrack.title}…`
+                : `Preparing ${pendingTrack.title}…`}
+          </Text>
         )}
-        {isPreparingAuto && upcoming.every((track) => !track.isAutoSuggested) && (
+        {isPreparingAuto && autoCount === 0 && (
           <Text style={styles.sectionLabel}>Preparing Auto Continue…</Text>
         )}
 
-        {upcoming.length === 0 ? (
+        {upcomingEntries.length === 0 ? (
           <View style={styles.emptyState}>
             <Music color={COLORS.text.muted} size={48} />
             <Text style={styles.emptyTitle}>{isPreparingAuto ? 'Finding what plays next' : 'Your queue is empty'}</Text>
@@ -269,6 +271,9 @@ export default function QueueScreen() {
             data={queueData}
             renderItem={renderUpcomingTrack}
             keyExtractor={(item) => item.id}
+            // The library wraps FlatList in its own View. Without sizing that
+            // wrapper, the inner flex:1 list can measure to zero in this sheet.
+            containerStyle={styles.list}
             style={styles.list}
             contentContainerStyle={{ paddingBottom: insets.bottom + SIZES.xxl }}
             showsVerticalScrollIndicator={false}
@@ -283,9 +288,9 @@ export default function QueueScreen() {
 
               const originalFrom = oldTracks.findIndex(t => t.id === movedItem.id);
               const originalTo = newTracks.findIndex(t => t.id === movedItem.id);
-              const staysInSection = movedItem.track.isAutoSuggested
+              const staysInSection = movedItem.origin === 'smartContinue'
                 ? originalTo >= manualCount + contextCount
-                : contextIds.has(movedItem.track.id)
+                : movedItem.origin === 'context'
                   ? originalTo >= manualCount && originalTo < manualCount + contextCount
                   : originalTo < manualCount;
 

@@ -46,7 +46,6 @@ export default function PlaylistDetailScreen() {
     addToQueue,
     currentTrack,
     isPlaying,
-    isLoading,
     togglePlayPause,
     shuffle,
     toggleShuffle,
@@ -254,17 +253,14 @@ export default function PlaylistDetailScreen() {
 
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
 
-      {currentTrack && (
-        <MiniPlayer
-          track={currentTrack}
-          isPlaying={isPlaying}
-          isLoading={isLoading}
-          onPlayPause={togglePlayPause}
-          onNext={next}
-          onPress={() => navigation.navigate('NowPlaying' as never)}
-          tabBarHeight={insets.bottom + SIZES.sm}
-        />
-      )}
+      <MiniPlayer
+        track={currentTrack}
+        isPlaying={isPlaying}
+        onPlayPause={togglePlayPause}
+        onNext={next}
+        onPress={() => navigation.navigate('NowPlaying' as never)}
+        tabBarHeight={insets.bottom + SIZES.sm}
+      />
     </View>
   );
 }

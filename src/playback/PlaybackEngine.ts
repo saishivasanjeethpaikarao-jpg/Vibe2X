@@ -60,6 +60,11 @@ export class PlaybackEngine {
   /** Set while we are swapping sources, so stale status events are ignored. */
   private loadToken = 0;
   private pendingActivation: { token: number; resolve: () => void; reject: (error: Error) => void } | null = null;
+  private activeMilestone: {
+    token: number;
+    callback: (stage: 'nativeLoadStart' | 'nativeReady' | 'firstPlaying') => void;
+    ready: boolean;
+  } | null = null;
   private completionFired = false;
 
   private configured = false;
@@ -142,8 +147,14 @@ export class PlaybackEngine {
       this.clearLoadTimer();
       this.pendingActivation?.reject(new Error(String(s.error)));
       this.pendingActivation = null;
+      this.activeMilestone = null;
       this.listeners.onError?.(appError('playback_failed', String(s.error)));
       return;
+    }
+
+    if (s?.isLoaded && this.activeMilestone?.token === this.loadToken && !this.activeMilestone.ready) {
+      this.activeMilestone.ready = true;
+      this.activeMilestone.callback('nativeReady');
     }
     
     // Sleep Timer background check via native status ticks
@@ -165,6 +176,8 @@ export class PlaybackEngine {
     this.listeners.onStatus?.(this.status);
 
     if (s?.isLoaded && s?.playing && this.pendingActivation?.token === this.loadToken) {
+      this.activeMilestone?.callback('firstPlaying');
+      this.activeMilestone = null;
       this.pendingActivation.resolve();
       this.pendingActivation = null;
     }
@@ -191,19 +204,24 @@ export class PlaybackEngine {
   async load(
     track: Track,
     stream: ResolvedStream,
-    options: { autoPlay?: boolean; startPosition?: number; isCurrent?: () => boolean } = {}
+    options: {
+      autoPlay?: boolean;
+      startPosition?: number;
+      isCurrent?: () => boolean;
+      onMilestone?: (stage: 'nativeLoadStart' | 'nativeReady' | 'firstPlaying') => void;
+    } = {}
   ): Promise<void> {
     const { autoPlay = true, startPosition = 0 } = options;
     const token = ++this.loadToken;
     this.pendingActivation?.reject(new Error('Playback request superseded'));
     this.pendingActivation = null;
+    this.activeMilestone = null;
 
     try {
       const player = this.ensurePlayer();
       await this.configure();
       if (token !== this.loadToken || options.isCurrent?.() === false) return;
 
-      this.currentTrackId = track.id;
       this.completionFired = false;
 
       this.status = { ...IDLE_STATUS, isBuffering: true, volume: this.desiredVolume };
@@ -211,6 +229,10 @@ export class PlaybackEngine {
 
       // Headers matter: a googlevideo URL fetched with a different User-Agent
       // than the one that extracted it comes back 403.
+      if (options.onMilestone) {
+        this.activeMilestone = { token, callback: options.onMilestone, ready: false };
+        options.onMilestone('nativeLoadStart');
+      }
       player.replace({ uri: stream.url, headers: stream.headers });
       player.volume = this.desiredVolume;
 
@@ -219,6 +241,7 @@ export class PlaybackEngine {
       this.loadTimer = setTimeout(() => {
         if (token !== this.loadToken) return;
         if (this.status.isLoaded && this.status.isPlaying) return;
+        this.activeMilestone = null;
         this.pendingActivation?.reject(new Error('Stream did not start'));
         this.pendingActivation = null;
         this.listeners.onError?.(appError('playback_failed', 'Stream did not start'));
@@ -237,12 +260,23 @@ export class PlaybackEngine {
       const activated = autoPlay ? new Promise<void>((resolve, reject) => {
         this.pendingActivation = { token, resolve, reject };
       }) : Promise.resolve();
-      this.setLockScreenMetadata(track);
       if (autoPlay) player.play();
       await activated;
+      if (token !== this.loadToken || options.isCurrent?.() === false) return;
+      this.currentTrackId = track.id;
+      // A pending selection must not replace system media metadata while the
+      // previous source is still the only confirmed active audio.
+      this.setLockScreenMetadata(track);
+      if (autoPlay) this.syncLockScreenOnce();
+      else this.clearLoadTimer();
     } catch (e) {
-      this.clearLoadTimer();
-      this.pendingActivation = null;
+      // An older rejected load can settle after a newer one started. It must
+      // never clear the newer load's timeout or pending native confirmation.
+      if (token === this.loadToken) {
+        this.clearLoadTimer();
+        if (this.activeMilestone?.token === token) this.activeMilestone = null;
+        this.pendingActivation = null;
+      }
       throw toAppError(e, 'playback_failed');
     }
   }
@@ -304,6 +338,7 @@ export class PlaybackEngine {
     this.loadToken++;
     this.pendingActivation?.reject(new Error('Playback stopped'));
     this.pendingActivation = null;
+    this.activeMilestone = null;
     this.currentTrackId = null;
     this.completionFired = false;
 
@@ -411,6 +446,10 @@ export class PlaybackEngine {
 
   async release(): Promise<void> {
     this.clearLoadTimer();
+    this.loadToken++;
+    this.pendingActivation?.reject(new Error('Playback released'));
+    this.pendingActivation = null;
+    this.activeMilestone = null;
     this.clearLockScreen();
 
     // The audio session is about to be deactivated, so the next player must

@@ -46,7 +46,6 @@ export default function HomeScreen() {
   const {
     currentTrack,
     isPlaying,
-    isLoading,
     togglePlayPause,
     playTrack,
     next,
@@ -252,17 +251,14 @@ export default function HomeScreen() {
 
       <StatusBarScrim />
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
-      {currentTrack && (
-        <MiniPlayer
-          track={currentTrack}
-          isPlaying={isPlaying}
-          isLoading={isLoading}
-          onPlayPause={togglePlayPause}
-          onNext={next}
-          onPress={() => navigation.navigate('NowPlaying' as never)}
-          tabBarHeight={tabBarHeight}
-        />
-      )}
+      <MiniPlayer
+        track={currentTrack}
+        isPlaying={isPlaying}
+        onPlayPause={togglePlayPause}
+        onNext={next}
+        onPress={() => navigation.navigate('NowPlaying' as never)}
+        tabBarHeight={tabBarHeight}
+      />
     </View>
   );
 }

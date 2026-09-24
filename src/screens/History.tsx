@@ -60,7 +60,7 @@ export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation();
-  const { playTrack, currentTrack, isPlaying, isLoading, togglePlayPause, next, addToQueue } = usePlayer();
+  const { playTrack, currentTrack, isPlaying, togglePlayPause, next, addToQueue } = usePlayer();
   const { history, clearHistory } = useLibrary();
 
   const sections = useMemo(() => groupByDay(history), [history]);
@@ -135,17 +135,14 @@ export default function HistoryScreen() {
 
       <AddToPlaylistSheet track={addingTrack} onClose={() => setAddingTrack(null)} />
 
-      {currentTrack && (
-        <MiniPlayer
-          track={currentTrack}
-          isPlaying={isPlaying}
-          isLoading={isLoading}
-          onPlayPause={togglePlayPause}
-          onNext={next}
-          onPress={() => navigation.navigate('NowPlaying' as never)}
-          tabBarHeight={tabBarHeight}
-        />
-      )}
+      <MiniPlayer
+        track={currentTrack}
+        isPlaying={isPlaying}
+        onPlayPause={togglePlayPause}
+        onNext={next}
+        onPress={() => navigation.navigate('NowPlaying' as never)}
+        tabBarHeight={tabBarHeight}
+      />
     </View>
   );
 }

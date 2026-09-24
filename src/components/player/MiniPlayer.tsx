@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { StyleSheet, Text, View, Image, TouchableOpacity, ActivityIndicator, Platform } from 'react-native';
-import { Play, Pause, MonitorSpeaker, SkipForward } from 'lucide-react-native';
+import { Play, Pause, MonitorSpeaker, SkipForward, RotateCw } from 'lucide-react-native';
 import { Track } from '../../core/types';
-import { useProgress } from '../../hooks/usePlayer';
+import { usePlayer, useProgress } from '../../hooks/usePlayer';
 import { PlaybackSourceSheet } from './PlaybackSourceSheet';
 import { COLORS, SIZES, FONTS, THEME } from '../../constants/theme';
 import { GlassSurface } from '../liquid/GlassSurface';
@@ -15,7 +15,6 @@ interface MiniPlayerProps {
   onPlayPause: () => void;
   onNext?: () => void;
   tabBarHeight?: number;
-  isLoading?: boolean;
 }
 
 /**
@@ -46,12 +45,22 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
   onPlayPause,
   onNext,
   tabBarHeight = Platform.OS === 'ios' ? 88 : 72,
-  isLoading = false
 }) => {
   const [showSource, setShowSource] = useState(false);
+  const { pendingTrack, transitionState, transitionFeedback, retry } = usePlayer();
+  const showingPending = Boolean(pendingTrack && transitionFeedback !== 'hidden');
+  const displayedTrack = showingPending ? pendingTrack : track;
+  const bufferingCurrent = !pendingTrack && transitionState === 'buffering' && transitionFeedback !== 'hidden';
+  const preparing = (showingPending && transitionFeedback !== 'failed') || bufferingCurrent;
+  const failed = showingPending && transitionFeedback === 'failed';
+  const transitioning = transitionState === 'resolving' || transitionState === 'preparing' || transitionState === 'buffering';
+  const stateLabel = transitionFeedback === 'long'
+    ? 'Taking a little longer…'
+    : transitionFeedback === 'preparing'
+      ? 'Getting your next vibe…'
+      : "Couldn't play this song";
 
-
-  if (!track) return null;
+  if (!displayedTrack) return null;
 
   return (
     <>
@@ -66,14 +75,16 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
           <PressableScale
             onPress={onPress}
             accessibilityRole="button"
-            accessibilityLabel={`Open Now Playing for ${track.title} by ${track.artist.name}`}
+            accessibilityLabel={`Open Now Playing for ${displayedTrack.title} by ${displayedTrack.artist.name}${preparing ? ', preparing' : ''}`}
             style={styles.openPlayerButton}
             contentStyle={styles.openPlayerContent}
           >
-            <Image source={{ uri: track.albumImageUrl }} style={styles.image} />
+            <Image source={{ uri: displayedTrack.albumImageUrl }} style={styles.image} />
             <View style={styles.infoContainer}>
-              <Text style={styles.title} numberOfLines={1}>{track.title}</Text>
-              <Text style={styles.artist} numberOfLines={1}>{track.artist.name}</Text>
+              <Text style={styles.title} numberOfLines={1}>{displayedTrack.title}</Text>
+              <Text style={styles.artist} numberOfLines={1} accessibilityLiveRegion="polite">
+                {preparing || failed ? stateLabel : displayedTrack.artist.name}
+              </Text>
             </View>
           </PressableScale>
 
@@ -89,11 +100,15 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
             <TouchableOpacity
               style={styles.playButton}
               accessibilityRole="button"
-              accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
-              onPress={onPlayPause}
+              accessibilityLabel={failed ? 'Retry song' : transitioning ? 'Preparing song' : isPlaying ? 'Pause' : 'Play'}
+              accessibilityState={{ disabled: transitioning, busy: preparing }}
+              disabled={transitioning}
+              onPress={failed ? retry : onPlayPause}
             >
-              {isLoading ? (
+              {preparing ? (
                 <ActivityIndicator size="small" color={COLORS.text.primary} />
+              ) : failed ? (
+                <RotateCw color={COLORS.text.primary} size={22} />
               ) : isPlaying ? (
                 <Pause color={COLORS.text.primary} size={24} fill={COLORS.text.primary} />
               ) : (
@@ -104,7 +119,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
               <TouchableOpacity
                 style={styles.iconButton}
                 accessibilityRole="button"
-                accessibilityLabel="Next track"
+                accessibilityLabel={failed ? 'Skip song' : 'Next track'}
                 onPress={onNext}
               >
                 <SkipForward color={COLORS.text.primary} size={20} fill={COLORS.text.primary} />
@@ -114,7 +129,7 @@ export const MiniPlayer: React.FC<MiniPlayerProps> = ({
         </View>
         
         {/* Progress Bar */}
-        <MiniPlayerProgress />
+        {!showingPending && <MiniPlayerProgress />}
       </GlassSurface>
     </View>
     <PlaybackSourceSheet visible={showSource} onClose={() => setShowSource(false)} />

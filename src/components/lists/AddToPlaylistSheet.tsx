@@ -17,6 +17,7 @@ import { LiquidSheet } from '../liquid/LiquidSheet';
 import { confirmLocalMutation } from '../../core/confirmedMutation';
 import { useSnackbar } from '../common/SnackbarContext';
 import { usePlayer } from '../../hooks/usePlayer';
+import { addWithQueueFeedback } from './queueSwipe';
 
 type Props = {
   /** The track being filed. Null closes the sheet. */
@@ -202,7 +203,7 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
             style={styles.row}
             activeOpacity={0.7}
             onPress={() => {
-              if (track && addToQueue(track)) { close(); show('Added to queue'); }
+              if (track && addWithQueueFeedback(track, addToQueue, show)) close();
             }}
             accessibilityRole="button"
             accessibilityLabel="Add to queue"
