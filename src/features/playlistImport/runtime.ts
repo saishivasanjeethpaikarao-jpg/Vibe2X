@@ -11,4 +11,6 @@ export const playlistImportEngine = new PlaylistImportEngine({
   spotify: spotifyPlaylistSource,
   searchTracks: async (query, signal) =>
     (await MusicService.search(query, { filter: 'Songs', limit: 8, signal })).tracks,
+  // Metadata lookup by a known YouTube identity; stream resolution stays in playback.
+  getYouTubeTrack: (videoId, signal) => youtubeResolver.getMetadata(videoId, signal),
 });

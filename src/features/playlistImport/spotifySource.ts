@@ -22,6 +22,7 @@ type SpotifyTrack = {
   is_local?: boolean;
   duration_ms?: number;
   external_urls?: { spotify?: string };
+  external_ids?: { isrc?: string };
   artists?: SpotifyArtist[];
   album?: { name?: string; images?: SpotifyImage[] };
 };
@@ -257,6 +258,7 @@ export class SpotifyPlaylistSource implements PlaylistSourceClient {
           album: source.album?.name,
           duration: Math.round((source.duration_ms ?? 0) / 1000),
           sourceUrl: source.external_urls?.spotify,
+          isrc: source.external_ids?.isrc,
         });
       }
 

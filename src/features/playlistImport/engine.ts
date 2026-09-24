@@ -1,13 +1,16 @@
-import { appErrorWithMessage } from '../../core/errors';
+import { appErrorWithMessage, toAppError } from '../../core/errors';
 import { Playlist, Track } from '../../core/types';
 import { matchSpotifyTrack } from './matching';
+import { normalizeMetadata, searchQueries } from './normalization';
 import {
+  ImportDiagnostics,
   ImportCollision,
   ImportProgress,
   ParsedPlaylistUrl,
   PlaylistSourceClient,
   PreparedImport,
   SourcePlaylist,
+  SourceTrack,
   SpotifyTrackMatch,
 } from './types';
 import { parsePlaylistUrl } from './url';
@@ -16,7 +19,22 @@ export type EngineDependencies = {
   youtube: PlaylistSourceClient;
   spotify: PlaylistSourceClient;
   searchTracks: (query: string, signal: AbortSignal) => Promise<Track[]>;
+  getYouTubeTrack?: (videoId: string, signal: AbortSignal) => Promise<Track>;
 };
+
+const MATCH_WORKERS = 4;
+const MATCH_QUERY_TIMEOUT_MS = 16_000;
+
+function youtubeId(url?: string): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const id = host === 'youtu.be' ? parsed.pathname.slice(1).split('/')[0]
+      : /(^|\.)youtube\.com$/.test(host) ? parsed.searchParams.get('v') : null;
+    return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  } catch { return null; }
+}
 
 const cancelled = () =>
   appErrorWithMessage('import_cancelled', 'Import cancelled. Nothing was saved.');
@@ -52,75 +70,149 @@ export class PlaylistImportEngine {
   async matchMetadata(
     playlist: SourcePlaylist,
     signal: AbortSignal,
-    onProgress?: (progress: ImportProgress) => void
+    onProgress?: (progress: ImportProgress) => void,
+    onDiagnostics?: (diagnostics: ImportDiagnostics) => void
   ): Promise<SpotifyTrackMatch[]> {
-    const matches: SpotifyTrackMatch[] = [];
-    const cache = new Map<string, Omit<SpotifyTrackMatch, 'source'>>();
+    if (signal.aborted) throw cancelled();
+    const started = Date.now();
+    const matches = new Array<SpotifyTrackMatch>(playlist.tracks.length);
+    const sourceCache = new Map<string, Promise<Omit<SpotifyTrackMatch, 'source'>>>();
+    const queryCache = new Map<string, Promise<Track[]>>();
     let matched = 0;
     let needsReview = 0;
-    let unavailable = playlist.unavailableCount;
+    let notFound = 0;
+    let temporaryFailures = 0;
+    let completed = 0;
+    let cursor = 0;
+    let consecutiveProviderFailures = 0;
+    let providerOutage = false;
+    const stats = { normalizationMs: 0, rankingMs: 0, providerMs: 0, providerCalls: 0, queryCacheHits: 0, sourceCacheHits: 0 };
 
-    for (let index = 0; index < playlist.tracks.length; index++) {
-      if (signal.aborted) throw cancelled();
-      const source = playlist.tracks[index];
-      const cached = cache.get(source.sourceId);
-      if (cached) {
-        matches.push({ source, ...cached });
-      } else {
-        let candidates: Track[] = [];
+    const search = (query: string): Promise<Track[]> => {
+      const key = normalizeMetadata(query);
+      const cached = queryCache.get(key);
+      if (cached) { stats.queryCacheHits++; return cached; }
+      stats.providerCalls++;
+      const work = (async () => {
+        const controller = new AbortController();
+        let rejectAbort: (reason: unknown) => void = () => undefined;
+        const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+        const onAbort = () => { controller.abort(); rejectAbort(cancelled()); };
+        signal.addEventListener('abort', onAbort, { once: true });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const began = Date.now();
         try {
-          const query = `${source.title} ${source.artists.join(' ')}`.trim();
-          candidates = await this.dependencies.searchTracks(query, signal);
-          let initial = matchSpotifyTrack(source, candidates);
-          if (!initial.alternatives.length && source.artists.length) {
-            const fallback = await this.dependencies.searchTracks(source.title, signal);
-            candidates = [...candidates, ...fallback.filter((track) => !candidates.some((item) => item.id === track.id))];
-            initial = matchSpotifyTrack(source, candidates);
-          }
-          if (!initial.alternatives.length && source.alternate) {
-            const fallback = await this.dependencies.searchTracks(
-              `${source.alternate.title} ${source.alternate.artists.join(' ')}`, signal
-            );
-            candidates = [...candidates, ...fallback.filter((track) => !candidates.some((item) => item.id === track.id))];
+          if (signal.aborted) throw cancelled();
+          const timeout = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              reject(appErrorWithMessage('timeout', 'Search timed out.'));
+            }, MATCH_QUERY_TIMEOUT_MS);
+          });
+          const tracks = await Promise.race([this.dependencies.searchTracks(query, controller.signal), timeout, aborted]);
+          consecutiveProviderFailures = 0;
+          return tracks;
+        } catch (error) {
+          if (signal.aborted) throw cancelled();
+          const kind = toAppError(error, 'provider_failed').kind;
+          consecutiveProviderFailures++;
+          if (kind === 'rate_limited' || consecutiveProviderFailures >= MATCH_WORKERS) providerOutage = true;
+          if (controller.signal.aborted) throw appErrorWithMessage('timeout', 'Search timed out.');
+          throw error;
+        } finally {
+          stats.providerMs += Date.now() - began;
+          if (timer) clearTimeout(timer);
+          signal.removeEventListener('abort', onAbort);
+        }
+      })();
+      queryCache.set(key, work);
+      return work;
+    };
+
+    const matchOne = async (source: SourceTrack): Promise<Omit<SpotifyTrackMatch, 'source'>> => {
+      if (providerOutage) return { confidence: 'NO_MATCH', alternatives: [], selectedTrack: null, reviewed: true, failureReason: 'PROVIDER_ERROR' };
+      const candidates = new Map<string, Track>();
+      const directId = youtubeId(source.sourceUrl);
+      if (directId && this.dependencies.getYouTubeTrack) {
+        stats.providerCalls++;
+        const metadataStarted = Date.now();
+        try {
+          const track = await this.dependencies.getYouTubeTrack(directId, signal);
+          consecutiveProviderFailures = 0;
+          if (track.provider === 'youtube' && track.sourceId === directId) {
+            return { confidence: 'HIGH', alternatives: [{ track, score: 1, confidence: 'HIGH', reasons: ['source ID'] }], selectedTrack: track, reviewed: true };
           }
         } catch (error) {
           if (signal.aborted) throw cancelled();
-          if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] MATCH', error instanceof Error ? error.name : 'unknown');
-          throw appErrorWithMessage(
-            'provider_failed',
-            `Matching stopped at “${source.title}” because search is unavailable. Nothing was saved.`
-          );
-        }
-        let match = matchSpotifyTrack(source, candidates);
-        if (source.alternate) {
-          const alternate = matchSpotifyTrack(
-            { ...source, title: source.alternate.title, artists: source.alternate.artists },
-            candidates
-          );
-          if ((alternate.alternatives[0]?.score ?? 0) > (match.alternatives[0]?.score ?? 0) + 0.01) {
-            match = alternate;
+          const kind = toAppError(error, 'provider_failed').kind;
+          if (kind === 'network' || kind === 'timeout' || kind === 'rate_limited') {
+            consecutiveProviderFailures++;
+            if (kind === 'rate_limited' || consecutiveProviderFailures >= MATCH_WORKERS) providerOutage = true;
           }
+          // A stale/unavailable URL is not evidence that title metadata cannot match.
+        } finally {
+          stats.providerMs += Date.now() - metadataStarted;
         }
-        const reusable = {
-          confidence: match.confidence,
-          alternatives: match.alternatives,
-          selectedTrack: match.selectedTrack,
-          reviewed: match.reviewed,
-        };
-        cache.set(source.sourceId, reusable);
-        matches.push(match);
       }
-      const confidence = matches[matches.length - 1].confidence;
-      if (confidence === 'HIGH') matched++;
-      else if (confidence === 'NO_MATCH') unavailable++;
-      else needsReview++;
-      if ((index + 1) % 5 === 0 || index + 1 === playlist.tracks.length) {
-        onProgress?.({ phase: 'matching', completed: index + 1, total: playlist.tracks.length, matched, needsReview, unavailable });
+      const normalizedAt = Date.now();
+      const queries = searchQueries(source.title, source.artists, source.album, source.alternate);
+      stats.normalizationMs += Date.now() - normalizedAt;
+      const rank = (item: SourceTrack) => {
+        const began = Date.now();
+        const ranked = matchSpotifyTrack(item, [...candidates.values()]);
+        stats.rankingMs += Date.now() - began;
+        return ranked;
+      };
+      let best = rank(source);
+      for (const query of queries) {
+        if (signal.aborted) throw cancelled();
+        if (providerOutage) return best.confidence === 'NO_MATCH' ? { ...best, failureReason: 'PROVIDER_ERROR' } : best;
+        try {
+          for (const track of await search(query)) candidates.set(track.id, track);
+        } catch (error) {
+          if (signal.aborted) throw cancelled();
+          const appError = toAppError(error, 'provider_failed');
+          if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] MATCH', appError.kind);
+          best = rank(source);
+          return best.confidence === 'NO_MATCH'
+            ? { ...best, failureReason: appError.kind === 'timeout' || appError.kind === 'network' ? 'NETWORK_TIMEOUT' : 'PROVIDER_ERROR' }
+            : best;
+        }
+        best = rank(source);
+        if (source.alternate && best.confidence !== 'HIGH') {
+          const alternate = rank({ ...source, ...source.alternate });
+          if ((alternate.alternatives[0]?.score ?? 0) > (best.alternatives[0]?.score ?? 0) + 0.01) best = alternate;
+        }
+        if (best.confidence === 'HIGH') break;
       }
-      // Yield between large batches so progress/cancel interactions can render.
-      if ((index + 1) % 5 === 0) await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
+      return best;
+    };
 
+    const worker = async () => {
+      while (cursor < playlist.tracks.length) {
+        if (signal.aborted) throw cancelled();
+        const index = cursor++;
+        const source = playlist.tracks[index];
+        const key = `${source.sourceId}:${normalizeMetadata(source.title)}:${source.sourceUrl ?? ''}`;
+        let task = sourceCache.get(key);
+        if (task) stats.sourceCacheHits++;
+        else { task = matchOne(source); sourceCache.set(key, task); }
+        const result = await task;
+        matches[index] = { ...result, source };
+        if (result.confidence === 'HIGH') matched++;
+        else if (result.confidence === 'MEDIUM' || result.confidence === 'LOW') needsReview++;
+        else if (result.failureReason === 'NETWORK_TIMEOUT' || result.failureReason === 'PROVIDER_ERROR') temporaryFailures++;
+        else notFound++;
+        completed++;
+        if (completed % 5 === 0 || completed === playlist.tracks.length) {
+          onProgress?.({ phase: 'matching', completed, total: playlist.tracks.length, matched, needsReview, notFound, temporaryFailures });
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(MATCH_WORKERS, playlist.tracks.length) }, () => worker()));
+    if (signal.aborted) throw cancelled();
+    onDiagnostics?.({ elapsedMs: Date.now() - started, ...stats, matched, needsReview, notFound, temporaryFailures });
     return matches;
   }
 
@@ -157,6 +249,8 @@ export class PlaylistImportEngine {
       reviewedMatches: 0,
       needsReview: 0,
       unavailableCount: playlist.unavailableCount,
+      notFoundCount: 0,
+      temporaryFailureCount: 0,
       duplicateCount: playlist.duplicateCount,
     };
   }
@@ -190,9 +284,8 @@ export class PlaylistImportEngine {
       else reviewedMatches++;
     }
 
-    const unmatchedOrSkipped = matches.filter(
-      (match) => match.confidence === 'NO_MATCH' || (match.reviewed && !match.selectedTrack)
-    ).length;
+    const notFoundCount = matches.filter((match) => match.confidence === 'NO_MATCH' && match.failureReason !== 'NETWORK_TIMEOUT' && match.failureReason !== 'PROVIDER_ERROR').length;
+    const temporaryFailureCount = matches.filter((match) => match.failureReason === 'NETWORK_TIMEOUT' || match.failureReason === 'PROVIDER_ERROR').length;
 
     return {
       playlist,
@@ -200,7 +293,9 @@ export class PlaylistImportEngine {
       automaticallyMatched,
       reviewedMatches,
       needsReview,
-      unavailableCount: playlist.unavailableCount + unmatchedOrSkipped,
+      unavailableCount: playlist.unavailableCount,
+      notFoundCount,
+      temporaryFailureCount,
       duplicateCount,
     };
   }

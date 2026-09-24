@@ -161,7 +161,9 @@ export default function ImportPlaylistScreen() {
     setMatches([]);
     setPhase('matching');
     setProgress({ phase: 'matching', completed: 0, total: fetched.tracks.length });
-    const resolved = await playlistImportEngine.matchMetadata(fetched, controller.signal, setProgress);
+    const resolved = await playlistImportEngine.matchMetadata(fetched, controller.signal, setProgress, (diagnostics) => {
+      if (__DEV__) console.info('[playlist-import] QA_MATCH', diagnostics);
+    });
     if (controller.signal.aborted) return;
     setMatches(resolved);
     setPhase('preview');
@@ -240,6 +242,29 @@ export default function ImportPlaylistScreen() {
     setPhase('idle');
   };
 
+  const retryTemporary = async () => {
+    if (!sourcePlaylist || abortRef.current || phase !== 'preview') return;
+    const failed = matches.filter((match) => match.failureReason === 'NETWORK_TIMEOUT' || match.failureReason === 'PROVIDER_ERROR');
+    if (!failed.length) return;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setPhase('matching');
+    setProgress({ phase: 'matching', completed: 0, total: failed.length });
+    try {
+      const retried = await playlistImportEngine.matchMetadata(
+        { ...sourcePlaylist, tracks: failed.map((match) => match.source) }, controller.signal, setProgress
+      );
+      if (controller.signal.aborted) return;
+      const byKey = new Map(retried.map((match) => [match.source.key, match]));
+      setMatches((current) => current.map((match) => byKey.get(match.source.key) ?? match));
+      setPhase('preview');
+    } catch (cause) {
+      if (!controller.signal.aborted) { setError(messageFor(cause)); setPhase('preview'); }
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  };
+
   const setMatchChoice = (key: string, trackId: string | null) => {
     setMatches((current) =>
       current.map((match) => {
@@ -301,6 +326,8 @@ export default function ImportPlaylistScreen() {
   };
 
   const reviewItems = matches.filter((match) => match.confidence === 'MEDIUM' || match.confidence === 'LOW');
+  const notFoundItems = matches.filter((match) => match.confidence === 'NO_MATCH' && match.failureReason !== 'NETWORK_TIMEOUT' && match.failureReason !== 'PROVIDER_ERROR');
+  const temporaryItems = matches.filter((match) => match.failureReason === 'NETWORK_TIMEOUT' || match.failureReason === 'PROVIDER_ERROR');
   const isWorking = phase === 'picking' || phase === 'fetching' || phase === 'matching';
   const contentWidth = Math.min(Math.max(width - SIZES.lg * 2, 0), 680);
 
@@ -342,7 +369,7 @@ export default function ImportPlaylistScreen() {
             accessibilityLabel={`${candidate.track.title} by ${candidate.track.artist.name}, ${Math.round(candidate.score * 100)} percent match`}
           >
             <View style={styles.alternativeText}>
-              <Text style={styles.alternativeTitle} numberOfLines={1}>
+              <Text style={styles.alternativeTitle} numberOfLines={2}>
                 {candidate.track.title}
               </Text>
               <Text style={styles.alternativeArtist} numberOfLines={1}>
@@ -443,7 +470,9 @@ export default function ImportPlaylistScreen() {
               <View style={styles.summaryList}>
                 <Summary label="Matched automatically" value={prepared.automaticallyMatched} />
                 <Summary label="Chosen during review" value={prepared.reviewedMatches} />
-                <Summary label="Unavailable or unmatched" value={prepared.unavailableCount} />
+                <Summary label="Couldn’t find" value={prepared.notFoundCount} />
+                <Summary label="Temporarily failed" value={prepared.temporaryFailureCount} />
+                {prepared.unavailableCount > 0 && <Summary label="Source items skipped" value={prepared.unavailableCount} />}
                 {prepared.duplicateCount > 0 && <Summary label="Duplicate matches skipped" value={prepared.duplicateCount} />}
               </View>
             )}
@@ -603,7 +632,7 @@ export default function ImportPlaylistScreen() {
                 )}
                 {progress?.phase === 'matching' && (
                   <Text style={styles.progressDetail}>
-                    {progress.matched ?? 0} matched · {progress.needsReview ?? 0} need review · {progress.unavailable ?? 0} unavailable
+                    {progress.matched ?? 0} matched · {progress.needsReview ?? 0} need review · {progress.notFound ?? 0} not found · {progress.temporaryFailures ?? 0} temporary errors
                   </Text>
                 )}
                 <TouchableOpacity style={styles.cancelButton} onPress={cancelActive}>
@@ -636,14 +665,16 @@ export default function ImportPlaylistScreen() {
                     <Summary label="Found tracks" value={sourcePlaylist.tracks.length} />
                     <Summary label="Matched automatically" value={prepared.automaticallyMatched} />
                     <Summary label="Need review" value={prepared.needsReview} />
-                    <Summary label="Unavailable or unmatched" value={prepared.unavailableCount} />
+                    <Summary label="Couldn’t find" value={prepared.notFoundCount} />
+                    <Summary label="Temporarily failed" value={prepared.temporaryFailureCount} />
+                    {prepared.unavailableCount > 0 && <Summary label="Source items skipped" value={prepared.unavailableCount} />}
                     {prepared.duplicateCount > 0 && <Summary label="Duplicate matches skipped" value={prepared.duplicateCount} />}
                   </View>
                 )}
                 {(sourcePlaylist.unavailableCount > 0 || prepared.duplicateCount > 0) && (
                   <Text style={styles.notice}>
                     {sourcePlaylist.unavailableCount > 0
-                      ? `${sourcePlaylist.unavailableCount} unavailable item${sourcePlaylist.unavailableCount === 1 ? '' : 's'} will be skipped. `
+                      ? `${sourcePlaylist.unavailableCount} source item${sourcePlaylist.unavailableCount === 1 ? '' : 's'} could not be read and will be skipped. `
                       : ''}
                     {prepared.duplicateCount > 0
                       ? `${prepared.duplicateCount} duplicate item${prepared.duplicateCount === 1 ? '' : 's'} will be skipped to match Vibe2X playlist behavior.`
@@ -676,6 +707,22 @@ export default function ImportPlaylistScreen() {
                   <TouchableOpacity style={styles.secondaryButton} onPress={() => setPhase('review')}>
                     <Text style={styles.secondaryButtonText}>Review {prepared.needsReview} matches</Text>
                   </TouchableOpacity>
+                )}
+                {prepared.temporaryFailureCount > 0 && (
+                  <TouchableOpacity style={styles.secondaryButton} onPress={() => void retryTemporary()} accessibilityRole="button">
+                    <Text style={styles.secondaryButtonText}>Retry {prepared.temporaryFailureCount} temporary failures</Text>
+                  </TouchableOpacity>
+                )}
+                {notFoundItems.length > 0 && (
+                  <Text style={styles.notice}>
+                    Couldn’t find: {notFoundItems.slice(0, 5).map((item) => item.source.title).join(' · ')}
+                    {notFoundItems.length > 5 ? ` · and ${notFoundItems.length - 5} more` : ''}. These are not confirmed unavailable.
+                  </Text>
+                )}
+                {temporaryItems.length > 0 && (
+                  <Text style={styles.notice}>
+                    {temporaryItems.length} track{temporaryItems.length === 1 ? '' : 's'} could not be checked right now. Retry before saving, or save the confirmed matches.
+                  </Text>
                 )}
                 {!prepared.tracks.length && (
                   <Text style={styles.notice}>No playable Vibe2X matches were found. Try an export with clear track and artist names.</Text>

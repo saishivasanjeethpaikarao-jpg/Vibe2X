@@ -118,6 +118,12 @@ describe('playlist file parsing', () => {
     expect(playlist.tracks[1].artists).toEqual([]);
   });
 
+  it('preserves optional ISRC metadata without treating it as a playback source', () => {
+    const parsed = parsePlaylistFile('export.csv', 'Title,Artist,ISRC\nSong,Singer,INAAA2600001');
+    expect(parsed.tracks[0].isrc).toBe('INAAA2600001');
+    expect(parsed.tracks[0].playableTrack).toBeUndefined();
+  });
+
   it('handles a 500+ track file without dropping order', () => {
     const rows = Array.from({ length: 550 }, (_, index) => `Song ${index},Artist ${index}`);
     const playlist = parsePlaylistFile('large.csv', ['Track name,Artist name', ...rows].join('\n'));
@@ -153,7 +159,8 @@ describe('file matching and picker', () => {
     expect(none.every((match) => match.confidence === 'NO_MATCH')).toBe(true);
     const prepared = engine([track('joga', 'Jóga')]).prepareMatched(playlist, partial);
     expect(prepared.tracks.map((item) => item.id)).toEqual(['joga']);
-    expect(prepared.unavailableCount).toBe(1);
+    expect(prepared.notFoundCount).toBe(1);
+    expect(prepared.unavailableCount).toBe(0);
   });
 
   it('counts duplicate matched entries once in the local playlist', async () => {

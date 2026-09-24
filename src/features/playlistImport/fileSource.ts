@@ -7,6 +7,7 @@ const TITLE_HEADERS = new Set(['trackname', 'tracktitle', 'songname', 'songtitle
 const ARTIST_HEADERS = new Set(['artistname', 'artistnames', 'artists', 'artist', 'performer', 'creator', 'singer']);
 const ALBUM_HEADERS = new Set(['album', 'albumname', 'albumtitle', 'release']);
 const URL_HEADERS = new Set(['url', 'uri', 'link', 'trackurl', 'spotifyurl', 'youtubeurl']);
+const ISRC_HEADERS = new Set(['isrc', 'trackisrc']);
 const PLAYLIST_HEADERS = new Set(['playlistname', 'playlist']);
 const DURATION_HEADERS = new Set(['duration', 'durationms', 'durationseconds', 'length']);
 
@@ -109,11 +110,11 @@ function stableSourceId(title: string, artist: string, album: string): string {
   return `${(first >>> 0).toString(16)}-${(second >>> 0).toString(16)}`;
 }
 
-function makeTrack(title: string, artist: string, album: string, duration: number, position: number, sourceUrl?: string): SourceTrack {
+function makeTrack(title: string, artist: string, album: string, duration: number, position: number, sourceUrl?: string, isrc?: string): SourceTrack {
   return {
     key: `file-row:${position}`, sourceId: stableSourceId(title, artist, album), position, title: title.trim(),
     artists: artist.split(/\s*;\s*/).map((part) => part.trim()).filter(Boolean),
-    album: album.trim() || undefined, duration, sourceUrl: sourceUrl || undefined,
+    album: album.trim() || undefined, duration, sourceUrl: sourceUrl || undefined, isrc: isrc?.trim() || undefined,
   };
 }
 
@@ -145,6 +146,7 @@ export function parsePlaylistFile(fileName: string, contents: string, options: F
     const playlistIndex = hasHeader ? headerIndex(header, PLAYLIST_HEADERS) : -1;
     const durationIndex = hasHeader ? headerIndex(header, DURATION_HEADERS) : -1;
     const urlIndex = hasHeader ? headerIndex(header, URL_HEADERS) : -1;
+    const isrcIndex = hasHeader ? headerIndex(header, ISRC_HEADERS) : -1;
     if (titleIndex < 0 || titleIndex >= first.length || artistIndex >= first.length || artistIndex === titleIndex)
       invalid('Choose different song-title and artist columns.');
 
@@ -159,7 +161,7 @@ export function parsePlaylistFile(fileName: string, contents: string, options: F
       }
       const duration = durationIndex >= 0 ? parseDuration(row[durationIndex] ?? '', header[durationIndex]) : 0;
       tracks.push(makeTrack(title, artist, albumIndex >= 0 ? row[albumIndex] ?? '' : '', duration, tracks.length,
-        urlIndex >= 0 ? row[urlIndex] : undefined));
+        urlIndex >= 0 ? row[urlIndex] : undefined, isrcIndex >= 0 ? row[isrcIndex] : undefined));
     }
   } else {
     const lines = text.split(/\r\n|\r|\n/);

@@ -23,13 +23,16 @@ export async function pickPlaylistFile(
   try {
     contents = asset.file ? await asset.file.text() : await read(asset.uri);
   } catch (error) {
-    if (__DEV__) console.warn('[playlist-import] FILE_READ', error instanceof Error ? error.name : 'unknown');
+    if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] FILE_READ', error instanceof Error ? error.name : 'unknown');
     throw appErrorWithMessage('invalid_playlist', 'Could not read that file from your device. Download it locally and try again.');
   }
   try {
-    return parsePlaylistFile(asset.name, contents, { mimeType: asset.mimeType });
+    const started = Date.now();
+    const parsed = parsePlaylistFile(asset.name, contents, { mimeType: asset.mimeType });
+    if (typeof __DEV__ !== 'undefined' && __DEV__) console.info('[playlist-import] QA_PARSE', { elapsedMs: Date.now() - started, rows: parsed.tracks.length });
+    return parsed;
   } catch (error) {
-    if (__DEV__) console.warn('[playlist-import] PARSE', error instanceof Error ? error.name : 'unknown');
+    if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] PARSE', error instanceof Error ? error.name : 'unknown');
     throw error;
   }
 }

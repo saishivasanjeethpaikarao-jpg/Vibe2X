@@ -16,6 +16,8 @@ export type SourceTrack = {
   album?: string;
   duration: number;
   sourceUrl?: string;
+  /** Optional metadata identity; it is never treated as a playback URL. */
+  isrc?: string;
   playableTrack?: Track;
   /** TXT exports vary between Artist - Title and Title - Artist. */
   alternate?: { title: string; artists: string[] };
@@ -50,11 +52,26 @@ export type SpotifyTrackMatch = {
   /** HIGH matches are preselected; all others require an explicit review choice. */
   selectedTrack: Track | null;
   reviewed: boolean;
+  failureReason?: 'NO_CANDIDATES' | 'LOW_CONFIDENCE' | 'AMBIGUOUS' | 'NETWORK_TIMEOUT' | 'PROVIDER_ERROR';
+};
+
+export type ImportDiagnostics = {
+  elapsedMs: number;
+  normalizationMs: number;
+  rankingMs: number;
+  providerMs: number;
+  providerCalls: number;
+  queryCacheHits: number;
+  sourceCacheHits: number;
+  matched: number;
+  needsReview: number;
+  notFound: number;
+  temporaryFailures: number;
 };
 
 export type ImportProgress =
   | { phase: 'fetching'; loaded: number; total?: number }
-  | { phase: 'matching'; completed: number; total: number; matched?: number; needsReview?: number; unavailable?: number };
+  | { phase: 'matching'; completed: number; total: number; matched?: number; needsReview?: number; notFound?: number; temporaryFailures?: number };
 
 export type ImportCollision = {
   sameSource: Playlist | null;
@@ -69,6 +86,8 @@ export type PreparedImport = {
   reviewedMatches: number;
   needsReview: number;
   unavailableCount: number;
+  notFoundCount: number;
+  temporaryFailureCount: number;
   duplicateCount: number;
 };
 

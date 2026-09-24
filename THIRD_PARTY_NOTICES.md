@@ -69,6 +69,17 @@ their own licenses, predominantly **MIT**. Their terms apply independently.
 Run `npm ls --all` for the resolved dependency tree, or consult each package's
 own `LICENSE` file under `node_modules/`.
 
+## Sanscript.js
+
+`@indic-transliteration/sanscript` (v1.3.3) is used for local, deterministic
+Indian-script transliteration of playlist-import matching copies. Imported
+metadata itself is preserved. Sanscript.js is Copyright © Arun Prasad and
+Sanskrit coders, distributed under the MIT License; its upstream source is
+https://github.com/indic-transliteration/sanscript.js. Its
+`@indic-transliteration/common_maps` (v1.0.6, © 2024 Sanskrit coders)
+supplies script maps under the MIT License. The package license texts are
+available in `node_modules/`.
+
 ---
 
 ## Spotify attribution asset

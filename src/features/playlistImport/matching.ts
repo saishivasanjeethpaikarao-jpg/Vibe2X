@@ -5,6 +5,7 @@ import {
   SourceTrack,
   SpotifyTrackMatch,
 } from './types';
+import { matchingVariants, normalizeMetadata } from './normalization';
 
 const QUALIFIERS = [
   'live',
@@ -17,26 +18,16 @@ const QUALIFIERS = [
   'sped up',
   'slowed',
   'reverb',
+  'reprise',
+  'cover',
 ];
-
-const HARMLESS = /\b(official\s+(audio|video)|audio\s+only|lyric(s)?\s+video|visuali[sz]er)\b/gi;
-const FEAT = /\b(featuring|feat\.?|ft\.?)\b/gi;
 
 function titleCore(value: string): string {
   return value.replace(/[\s([{\-]+(?:featuring|feat\.?|ft\.?)\s+[^\])}]+[\])}]?\s*$/i, ' ');
 }
 
 export function normalizeText(value: string): string {
-  return value
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(FEAT, ' feat ')
-    .replace(HARMLESS, ' ')
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
+  return normalizeMetadata(value);
 }
 
 function tokens(value: string): Set<string> {
@@ -52,9 +43,17 @@ function overlap(left: string, right: string): number {
   return (2 * common) / (a.size + b.size);
 }
 
+function variantOverlap(left: string, right: string, title = false): number {
+  const leftVariants = matchingVariants(left, title);
+  const rightVariants = matchingVariants(right, title);
+  let best = 0;
+  for (const a of leftVariants) for (const b of rightVariants) best = Math.max(best, overlap(a, b));
+  return best;
+}
+
 function qualifierSet(value: string): Set<string> {
-  const normalized = normalizeText(value);
-  return new Set(QUALIFIERS.filter((q) => normalized.includes(q)));
+  const normalized = ` ${normalizeText(value)} `;
+  return new Set(QUALIFIERS.filter((q) => normalized.includes(` ${q} `)));
 }
 
 function sameQualifiers(left: string, right: string): boolean {
@@ -72,24 +71,23 @@ function confidenceFor(score: number): MatchConfidence {
 
 export function scoreTrackMatch(source: SourceTrack, candidate: Track): MatchCandidate | null {
   const reasons: string[] = [];
-  const titleSimilarity = overlap(titleCore(source.title), titleCore(candidate.title));
-  const sourceArtists = source.artists.map(normalizeText).filter(Boolean);
+  const titleSimilarity = variantOverlap(titleCore(source.title), titleCore(candidate.title), true);
+  const sourceArtists = source.artists.filter(Boolean);
   const candidateArtists = candidate.artist.name
-    .split(/\s*(?:,|&|\band\b|\bfeaturing\b|\bfeat\.?\b|\bft\.?\b)\s*/i)
-    .map(normalizeText)
+    .split(/\s*(?:,|;|&|\band\b|\bfeaturing\b|\bfeat\.?\b|\bft\.?\b|\bx\b)\s*/i)
     .filter(Boolean);
-  const combinedCandidateArtist = normalizeText(candidate.artist.name);
+  const combinedCandidateArtist = candidate.artist.name;
   if (combinedCandidateArtist) candidateArtists.push(combinedCandidateArtist);
 
   const primaryArtist = sourceArtists[0] ?? '';
   const primaryScore = Math.max(
-    ...candidateArtists.map((artist) => overlap(primaryArtist, artist)),
+    ...candidateArtists.map((artist) => variantOverlap(primaryArtist, artist)),
     0
   );
   const allArtistScore = sourceArtists.length
     ? sourceArtists.reduce(
         (sum, artist) =>
-          sum + Math.max(...candidateArtists.map((other) => overlap(artist, other)), 0),
+          sum + Math.max(...candidateArtists.map((other) => variantOverlap(artist, other)), 0),
         0
       ) / sourceArtists.length
     : 0;
@@ -104,7 +102,7 @@ export function scoreTrackMatch(source: SourceTrack, candidate: Track): MatchCan
     if (delta <= 4) reasons.push('duration');
   }
 
-  const albumScore = source.album && candidate.album ? overlap(source.album, candidate.album) : 0.5;
+  const albumScore = source.album && candidate.album ? variantOverlap(source.album, candidate.album) : 0.5;
   const titleOnly = sourceArtists.length === 0;
   let score = titleOnly
     ? titleSimilarity * 0.85 + durationScore * 0.1 + albumScore * 0.05
@@ -118,7 +116,7 @@ export function scoreTrackMatch(source: SourceTrack, candidate: Track): MatchCan
   }
 
   // Same-title songs by the wrong artist are never acceptable auto-matches.
-  if (!titleOnly && primaryScore < 0.45) score -= 0.3;
+  if (!titleOnly && primaryScore < 0.65) score -= 0.3;
 
   score = Math.max(0, Math.min(1, score));
   // Without an artist, a same-title song can be a different recording.
@@ -149,5 +147,6 @@ export function matchSpotifyTrack(source: SourceTrack, candidates: Track[]): Spo
     selectedTrack: confidence === 'HIGH' ? best.track : null,
     // No alternatives cannot be reviewed into a match; count it as skipped.
     reviewed: confidence === 'HIGH' || !best,
+    failureReason: ambiguous ? 'AMBIGUOUS' : !best ? candidates.length ? 'LOW_CONFIDENCE' : 'NO_CANDIDATES' : undefined,
   };
 }
