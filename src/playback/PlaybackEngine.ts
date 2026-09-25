@@ -374,8 +374,8 @@ export class PlaybackEngine {
    * Native lock-screen / notification controls.
    *
    * expo-audio owns the single MediaSession; Vibe2X must not create a second
-   * one. Play/pause, the scrub bar and seek +/-10s act directly on this same
-   * player, so the engine stays the one source of truth.
+   * one. Play/pause and the scrub bar act directly on this same player, while
+   * standard skip commands enter the existing Vibe2X queue controller.
    *
    * Attaching and updating are deliberately different calls:
    *
@@ -389,9 +389,8 @@ export class PlaybackEngine {
    * when position and duration are still 0 -- leaving the notification stuck
    * at 00:00 with a dead progress bar.
    *
-   * Next/previous are absent because expo-audio’s AudioMediaSessionCallback
-   * removes COMMAND_SEEK_TO_NEXT / COMMAND_SEEK_TO_PREVIOUS from the session
-   * and exposes no JS event for them.
+   * The pinned expo-audio patch exposes standard previous/next capabilities
+   * and forwards those commands as transportControl events.
    */
   private setLockScreenMetadata(track: Track): void {
     if (Platform.OS === 'web') return;
@@ -433,8 +432,8 @@ export class PlaybackEngine {
       // expo-audio's native module drops it from cache, and the next time the user pauses
       // or seeks from the lockscreen, the session goes blank.
       this.player?.setActiveForLockScreen(true, this.metadataFor(track), {
-        showSeekForward: true,
-        showSeekBackward: true,
+        showSeekForward: false,
+        showSeekBackward: false,
       });
       this.lockScreenActive = true;
     } catch {

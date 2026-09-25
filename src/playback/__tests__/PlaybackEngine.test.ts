@@ -76,7 +76,8 @@ describe('PlaybackEngine transition confirmation', () => {
     native.listeners.forEach((listener) => listener({ isLoaded: true, playing: true, currentTime: 0, duration: 180 }));
     await first;
     expect(native.player.setActiveForLockScreen).toHaveBeenLastCalledWith(
-      true, expect.objectContaining({ title: 'A' }), expect.any(Object)
+      true, expect.objectContaining({ title: 'A' }),
+      expect.objectContaining({ showSeekBackward: false, showSeekForward: false })
     );
 
     const second = engine.load(track('B'), stream);
