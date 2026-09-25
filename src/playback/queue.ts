@@ -316,6 +316,12 @@ export class Queue {
     for (const track of this.autoUpcoming) this.remove(track.id, { keepCurrent: true });
   }
 
+  /** Atomically rerank only the automatic tail; manual/context play order stays intact. */
+  replaceAutoUpcoming(tracks: Track[]): void {
+    this.clearAutoUpcoming();
+    this.add(tracks);
+  }
+
   setShuffle(on: boolean): void {
     if (this.shuffleOn === on) return;
     this.shuffleOn = on;

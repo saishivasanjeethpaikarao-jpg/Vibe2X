@@ -43,7 +43,7 @@ The following capabilities are implemented in the current source:
 - Liked tracks, local playlists, imported provider playlists, pinning, renaming, and deletion.
 - On-device audio scanning through Android MediaLibrary permissions.
 - Recently played items, listening history, search history, and persisted playback position.
-- Shared Auto Continue candidate selection from the current song, search context, provider-related results, likes, and listening history, subject to recent-play and suppression exclusions. Runtime behavior is awaiting device retest.
+- Shared Auto Continue draws candidate tracks from the current song's provider-related results and active search context. Likes, searches, and listening history adjust ranking rather than directly filling the queue; recent plays and suppressed tracks are filtered. Recommendation quality is awaiting device retest.
 - Local profile/settings storage and JSON library-backup export.
 
 These are source-level capabilities, not a claim that every device, Android version, provider response, or network condition has been tested. See [Verification status](#verification-status).

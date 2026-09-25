@@ -77,6 +77,18 @@ describe('Queue', () => {
       .toEqual([['M', 'manual'], ['P', 'context'], ['S', 'smartContinue']]);
   });
 
+  it('reranks only the automatic tail without changing manual priority', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    queue.add([mockTrack('B', { isAutoSuggested: true }), mockTrack('C', { isAutoSuggested: true })]);
+    queue.add(mockTrack('X'));
+    queue.replaceAutoUpcoming([mockTrack('D', { isAutoSuggested: true }), mockTrack('B', { isAutoSuggested: true })]);
+    expect(queue.upcomingEntries.map(({ track, origin }) => [track.id, origin]))
+      .toEqual([['X', 'manual'], ['D', 'smartContinue'], ['B', 'smartContinue']]);
+    expect(queue.next(true)?.id).toBe('X');
+    expect(queue.next(true)?.id).toBe('D');
+  });
+
   it('multiple queue additions preserve order', () => {
     const queue = new Queue();
     queue.setTracks([mockTrack('A')]);

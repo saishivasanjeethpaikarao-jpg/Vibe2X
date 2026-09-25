@@ -124,6 +124,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const autoFill = useRef<Promise<void> | null>(null);
   const lastAutoEnabled = useRef<boolean | null>(null);
   const sessionSkippedIds = useRef(new Set<string>());
+  const refreshAfterNext = useRef(false);
+  const lastLikedSignature = useRef<string | null>(null);
   const confirmedTrack = useRef<Track | null>(null);
 
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
@@ -220,18 +222,23 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     writeJsonDebounced(STORAGE_KEYS.queue, queueRef.current.snapshot(), 600);
   }, []);
 
-  const signals = useCallback((recentIds = new Set<string>(), suppressedIds = new Set<string>()): RecommendationSignals => ({
-    liked: LibraryService.getLiked(),
-    history: LibraryService.getHistory(),
-    recentIds,
-    suppressedIds: new Set([...suppressedIds, ...sessionSkippedIds.current]),
-  }), []);
+  const signals = useCallback((recentIds = new Set<string>(), suppressedIds = new Set<string>()): RecommendationSignals => {
+    const history = LibraryService.getHistory();
+    const cutoff = Date.now() - 12 * 60 * 60 * 1000;
+    return {
+      liked: LibraryService.getLiked(),
+      history,
+      searches: LibraryService.getSearchHistory(),
+      recentIds: new Set([...recentIds, ...history.filter((entry) => entry.playedAt >= cutoff).map((entry) => entry.track.id)]),
+      suppressedIds: new Set([...suppressedIds, ...sessionSkippedIds.current]),
+    };
+  }, []);
 
-  const fillAuto = useCallback((): Promise<void> => {
+  const fillAuto = useCallback((refresh = false): Promise<void> => {
     if (!LibraryService.getSettings().autoplayRelated || !queueRef.current.current || stopAtEndRef.current) return Promise.resolve();
     if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return Promise.resolve();
     const automaticCount = queueRef.current.autoUpcoming.length;
-    if (automaticCount >= 3) return Promise.resolve();
+    if (!refresh && automaticCount >= 3) return Promise.resolve();
     if (autoFill.current) return autoFill.current;
     const session = autoSession.current;
     setIsPreparingAuto(true);
@@ -239,14 +246,20 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       try {
         const [recentIds, suppressedIds] = await Promise.all([getRecentTrackIds(12), getSuppressedTrackIds()]);
         if (session !== autoSession.current) return;
+        const replaceableIds = new Set(refresh ? queueRef.current.autoUpcoming.map((track) => track.id) : []);
         const candidates = await autoManager.current.refill(
-          new Set(queueRef.current.items.map((track) => track.id)),
+          new Set(queueRef.current.items.filter((track) => !replaceableIds.has(track.id)).map((track) => track.id)),
           signals(recentIds, suppressedIds),
-          4 - queueRef.current.autoUpcoming.length
+          refresh ? 4 : 4 - queueRef.current.autoUpcoming.length
         );
         if (session !== autoSession.current || !LibraryService.getSettings().autoplayRelated || stopAtEndRef.current) return;
         if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return;
-        if (queueRef.current.add(candidates)) {
+        if (refresh && candidates.length) {
+          queueRef.current.replaceAutoUpcoming(candidates);
+          bumpQueue();
+          persistQueue();
+          preloader.schedule(queueRef.current.peekNext());
+        } else if (queueRef.current.add(candidates)) {
           bumpQueue();
           persistQueue();
           preloader.schedule(queueRef.current.peekNext());
@@ -259,19 +272,37 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     return work;
   }, [bumpQueue, persistQueue, signals]);
 
-  useEffect(() => LibraryService.subscribe(() => {
-    const enabled = LibraryService.getSettings().autoplayRelated;
-    if (lastAutoEnabled.current === enabled) return;
-    lastAutoEnabled.current = enabled;
-    if (!enabled) {
-      autoManager.current.cancel();
-      autoFill.current = null;
-      queueRef.current.clearAutoUpcoming();
-      bumpQueue();
-      persistQueue();
-      preloader.schedule(queueRef.current.peekNext());
-    } else void fillAuto();
-  }), [bumpQueue, fillAuto, persistQueue]);
+  const refreshAuto = useCallback(() => {
+    const session = autoSession.current;
+    const current = autoFill.current;
+    if (current) {
+      // In-flight discovery reads the latest session signals when it ranks.
+      if (queueRef.current.autoUpcoming.length === 0) return;
+      void current.finally(() => {
+        if (session === autoSession.current) void fillAuto(true);
+      });
+    } else void fillAuto(true);
+  }, [fillAuto]);
+
+  useEffect(() => {
+    lastLikedSignature.current = LibraryService.getLiked().map((track) => track.id).sort().join('|');
+    return LibraryService.subscribe(() => {
+      const likedSignature = LibraryService.getLiked().map((track) => track.id).sort().join('|');
+      if (lastLikedSignature.current !== null && likedSignature !== lastLikedSignature.current) refreshAuto();
+      lastLikedSignature.current = likedSignature;
+      const enabled = LibraryService.getSettings().autoplayRelated;
+      if (lastAutoEnabled.current === enabled) return;
+      lastAutoEnabled.current = enabled;
+      if (!enabled) {
+        autoManager.current.cancel();
+        autoFill.current = null;
+        queueRef.current.clearAutoUpcoming();
+        bumpQueue();
+        persistQueue();
+        preloader.schedule(queueRef.current.peekNext());
+      } else void fillAuto();
+    });
+  }, [bumpQueue, fillAuto, persistQueue, refreshAuto]);
 
   // ---- loading a track --------------------------------------------------
 
@@ -383,12 +414,15 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (autoManager.current.seedId !== track.id) {
           autoSession.current++;
           autoFill.current = null;
-          autoManager.current.start(track, queueRef.current.upcoming.filter((item) => item.isAutoSuggested));
+          autoManager.current.advance(track);
         }
 
         // Warm exactly one track ahead, so pressing skip is instant.
         preloader.schedule(queueRef.current.peekNext());
-        void fillAuto();
+        if (refreshAfterNext.current) {
+          refreshAfterNext.current = false;
+          void fillAuto(true);
+        } else void fillAuto();
       } catch (e) {
         if (!transition.current.isCurrent(id)) return;
 
@@ -622,6 +656,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     (track: Track, context?: { tracks?: Track[]; label?: string; candidates?: Track[]; query?: string }) => {
       if (transitioning.current && loadingTrackId.current === track.id) return;
       nextIntent.current++;
+      refreshAfterNext.current = false;
       const intentAt = Date.now();
       autoSession.current++;
       autoFill.current = null;
@@ -672,8 +707,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const next = useCallback(async () => {
     const intent = ++nextIntent.current;
     const intentAt = Date.now();
-    if (!transitioning.current && statusRef.current.isPlaying && statusRef.current.position > 0 && statusRef.current.position < 10 && confirmedTrack.current) {
+    if (!transitioning.current && statusRef.current.isPlaying && statusRef.current.position < 10 && confirmedTrack.current) {
       sessionSkippedIds.current.add(confirmedTrack.current.id);
+      autoManager.current.noteSkip(confirmedTrack.current);
+      refreshAfterNext.current = true;
     }
     const session = autoSession.current;
     if (!queueRef.current.peekNext() && !queueRef.current.hasNext) await fillAuto();
@@ -682,7 +719,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     bumpQueue();
     persistQueue();
 
-    if (!nextTrack) return;
+    if (!nextTrack) {
+      refreshAfterNext.current = false;
+      return;
+    }
     // Consecutive presses in one JS turn coalesce into the latest selection.
     Promise.resolve().then(() => {
       if (intent === nextIntent.current) void loadCurrent({ autoPlay: true, intentAt });
@@ -794,14 +834,16 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       );
       const added = queueRef.current.add(manual);
       if (!added) return false;
+      autoManager.current.noteManual(manual);
       bumpQueue();
       persistQueue();
 
       if (wasEmpty) void loadCurrent({ autoPlay: true });
       else preloader.schedule(queueRef.current.peekNext());
+      if (!wasEmpty) refreshAuto();
       return true;
     },
-    [bumpQueue, loadCurrent, persistQueue]
+    [bumpQueue, loadCurrent, persistQueue, refreshAuto]
   );
 
   const playNextInQueue = useCallback(
@@ -811,17 +853,21 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         track.isAutoSuggested ? { ...track, isAutoSuggested: false } : track
       );
       queueRef.current.playNext(manual);
+      autoManager.current.noteManual(manual);
       bumpQueue();
       persistQueue();
 
       if (wasEmpty) void loadCurrent({ autoPlay: true });
       else preloader.schedule(queueRef.current.peekNext());
+      if (!wasEmpty) refreshAuto();
     },
-    [bumpQueue, loadCurrent, persistQueue]
+    [bumpQueue, loadCurrent, persistQueue, refreshAuto]
   );
 
   const removeFromQueue = useCallback(
     (trackId: string) => {
+      const removedAuto = queueRef.current.autoUpcoming.find((track) => track.id === trackId);
+      if (removedAuto) autoManager.current.noteSkip(removedAuto);
       const removedCurrent = queueRef.current.remove(trackId);
       bumpQueue();
       persistQueue();
@@ -830,9 +876,9 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       if (removedCurrent) {
         if (queueRef.current.current) void loadCurrent({ autoPlay: true });
         else void loadCurrent();
-      }
+      } else if (removedAuto) refreshAuto();
     },
-    [bumpQueue, loadCurrent, persistQueue]
+    [bumpQueue, loadCurrent, persistQueue, refreshAuto]
   );
 
   const reorderQueue = useCallback(

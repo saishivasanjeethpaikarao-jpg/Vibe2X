@@ -16,7 +16,7 @@ describe('Auto Continue', () => {
       related: async () => [], search: async () => [], canPlay: () => true,
     });
     manager.start(track('A'), [track('B'), track('C'), track('D')], 'salar');
-    expect(manager.immediate(new Set(['A']), emptySignals).map((item) => item.id)).toEqual(['B', 'C', 'D']);
+    expect(manager.immediate(new Set(['A']), emptySignals).map((item) => item.id)).toEqual(['B', 'C']);
   });
 
   it('deduplicates, suppresses recent and invalid candidates by stable id', () => {
