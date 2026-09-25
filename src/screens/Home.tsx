@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Image,
   ScrollView,
   StyleSheet,
@@ -11,7 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Compass, Heart, Moon, Search, Target, User } from 'lucide-react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { AddToPlaylistSheet } from '../components/lists/AddToPlaylistSheet';
 import { TrackRow } from '../components/lists/TrackRow';
 import { MiniPlayer } from '../components/player/MiniPlayer';
@@ -26,6 +27,7 @@ import { useLibrary } from '../hooks/useLibrary';
 import { usePlayer } from '../hooks/usePlayer';
 import { MusicService } from '../services/MusicService';
 import { useSnackbar } from '../components/common/SnackbarContext';
+import { greetingForHour } from '../core/greeting';
 
 const LOGO = require('../../assets/icon.png');
 
@@ -35,9 +37,6 @@ const ACTIONS = [
   { id: 'chill', label: 'Chill', Icon: Moon, query: 'chill relaxing songs' },
   { id: 'focus', label: 'Focus', Icon: Target, query: 'focus instrumental concentration' },
 ] as const;
-
-const greetingFor = (hour: number) =>
-  hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -57,6 +56,16 @@ export default function HomeScreen() {
   const [starter, setStarter] = useState<Track[]>([]);
   const [starterError, setStarterError] = useState(false);
   const [addingTrack, setAddingTrack] = useState<Track | null>(null);
+  const [localHour, setLocalHour] = useState(() => new Date().getHours());
+
+  useFocusEffect(useCallback(() => {
+    const update = () => setLocalHour(new Date().getHours());
+    update();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') update();
+    });
+    return () => subscription.remove();
+  }, []));
 
   const hasRecents = recentlyPlayed.length > 0;
   const pinnedPlaylists = useMemo(
@@ -146,7 +155,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.greetingBlock}>
-          <Text style={styles.greeting}>{greetingFor(new Date().getHours())}</Text>
+          <Text style={styles.greeting}>{greetingForHour(localHour)}</Text>
           {!!profile.name && <Text style={styles.name}>{profile.name}</Text>}
         </View>
 

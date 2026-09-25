@@ -29,7 +29,9 @@ export async function pickPlaylistFile(
   try {
     const started = Date.now();
     const parsed = parsePlaylistFile(asset.name, contents, { mimeType: asset.mimeType });
-    if (typeof __DEV__ !== 'undefined' && __DEV__) console.info('[playlist-import] QA_PARSE', { elapsedMs: Date.now() - started, rows: parsed.tracks.length });
+    if ((typeof __DEV__ !== 'undefined' && __DEV__) || process.env.EXPO_PUBLIC_IMPORT_QA_TIMING === '1') {
+      console.info('[playlist-import] QA_PARSE', { elapsedMs: Date.now() - started, rows: parsed.tracks.length });
+    }
     return parsed;
   } catch (error) {
     if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] PARSE', error instanceof Error ? error.name : 'unknown');

@@ -1,4 +1,5 @@
 import { Track } from '../core/types';
+import { logicalSongKey } from '../core/logicalSong';
 
 export type RecommendationSignals = {
   liked: Track[];
@@ -6,6 +7,7 @@ export type RecommendationSignals = {
   searches?: string[];
   recentIds: ReadonlySet<string>;
   suppressedIds: ReadonlySet<string>;
+  excludedSongKeys?: ReadonlySet<string>;
 };
 
 export type CandidateSource = {
@@ -34,14 +36,6 @@ function normalized(value?: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
-function songKey(track: Track): string {
-  const fullTitle = normalized(track.title);
-  const title = fullTitle
-    .replace(/\b(official (music )?(audio|video)|lyric(s)? video)\b/g, '')
-    .replace(/\s+/g, ' ').trim() || fullTitle;
-  return `${normalized(track.artist.name)}|${title}`;
-}
-
 function queryMatches(track: Track, query: string): boolean {
   const words = normalized(query).split(' ').filter((word) => word.length > 2);
   const metadata = normalized(`${track.title} ${track.artist.name} ${track.album ?? ''}`);
@@ -64,7 +58,7 @@ export function rankContinuationDetailed(
   const historyIds = new Set(signals.history.map((entry) => entry.track.id));
   const recentSongKeys = new Set(signals.history
     .filter((entry) => entry.playedAt >= Date.now() - 12 * 60 * 60 * 1000)
-    .map((entry) => songKey(entry.track)));
+    .map((entry) => logicalSongKey(entry.track)));
   const historyArtists = new Map<string, number>();
   for (const entry of signals.history) {
     const artist = normalized(entry.track.artist.name);
@@ -82,8 +76,8 @@ export function rankContinuationDetailed(
     if (!track?.id || !track.sourceId || !track.title || !canPlay(track)) return;
     if (track.id === seed.id || excluded.has(track.id)) return;
     if (signals.recentIds.has(track.id) || signals.suppressedIds.has(track.id)) return;
-    const key = songKey(track);
-    if (key === songKey(seed) || recentSongKeys.has(key)) return;
+    const key = logicalSongKey(track);
+    if (key === logicalSongKey(seed) || recentSongKeys.has(key) || signals.excludedSongKeys?.has(key)) return;
     const existing = bySong.get(key);
     if (existing) existing.origins.add(origin);
     else if (bySong.size < POOL_SIZE) bySong.set(key, { track, origins: new Set([origin]), index });
@@ -254,7 +248,7 @@ export class AutoContinueManager {
     if (controller.signal.aborted || generation !== this.generation) return [];
     const secondQuery = this.query && normalized(this.query) !== normalized(artistQuery)
       ? this.query : seed.album?.trim();
-    if (new Set(candidates.filter(({ track }) => track.id !== seed.id).map(({ track }) => songKey(track))).size < 20 &&
+    if (new Set(candidates.filter(({ track }) => track.id !== seed.id).map(({ track }) => logicalSongKey(track))).size < 20 &&
         secondQuery && normalized(secondQuery) !== normalized(artistQuery)) {
       try {
         const found = await this.source.search(secondQuery, controller.signal);

@@ -36,6 +36,9 @@ type EngineEvents = {
   onComplete: () => void;
   /** Playback failed for the loaded track. */
   onError: (error: unknown) => void;
+  /** Android media-session transport requests; ordering stays in usePlayer. */
+  onNext: () => void;
+  onPrevious: () => void;
 };
 
 /**
@@ -48,6 +51,7 @@ type EngineEvents = {
 export class PlaybackEngine {
   private player: AudioPlayer | null = null;
   private subscription: { remove: () => void } | null = null;
+  private transportSubscription: { remove: () => void } | null = null;
   private listeners: Partial<EngineEvents> = {};
 
   private status: PlaybackStatus = { ...IDLE_STATUS };
@@ -117,6 +121,17 @@ export class PlaybackEngine {
     this.subscription = player.addListener('playbackStatusUpdate', (s) => {
       this.handleStatus(s);
     });
+    if (Platform.OS === 'android') {
+      // The pinned expo-audio native patch emits only a transport intent. The
+      // same JS queue controller handles it as an in-app Next/Previous press.
+      const transportPlayer = player as unknown as {
+        addListener: (name: 'transportControl', callback: (event: { action?: string }) => void) => { remove: () => void };
+      };
+      this.transportSubscription = transportPlayer.addListener('transportControl', (event) => {
+        if (event?.action === 'next') this.listeners.onNext?.();
+        else if (event?.action === 'previous') this.listeners.onPrevious?.();
+      });
+    }
 
     this.player = player;
     return player;
@@ -445,6 +460,8 @@ export class PlaybackEngine {
   }
 
   async release(): Promise<void> {
+    this.transportSubscription?.remove();
+    this.transportSubscription = null;
     this.clearLoadTimer();
     this.loadToken++;
     this.pendingActivation?.reject(new Error('Playback released'));

@@ -49,7 +49,9 @@ export class YouTubeResolver implements TrackResolver {
 
     const filter = options.filter ?? 'All';
     const limit = options.limit ?? 20;
-    const cacheKey = `yt:search:${filter}:${q.toLowerCase()}`;
+    // The result parser truncates to limit; sharing a cache entry between an
+    // 8-result importer and a 20-result Search silently hid later matches.
+    const cacheKey = `yt:search:${filter}:${limit}:${q.toLowerCase()}`;
 
     const cached = metadataCache.get<SearchResults>(cacheKey);
     if (cached) return cached;

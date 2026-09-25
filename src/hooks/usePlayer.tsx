@@ -19,6 +19,7 @@ import { endpointSource } from '../providers/stream/StreamResolver';
 import { LibraryService } from '../services/LibraryService';
 import { MusicService } from '../services/MusicService';
 import { getSuppressedTrackIds, getRecentTrackIds } from '../core/lie';
+import { logicalSongKey } from '../core/logicalSong';
 import { AutoContinueManager, RecommendationSignals } from '../playback/AutoContinueManager';
 import {
   feedbackFor,
@@ -247,9 +248,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const [recentIds, suppressedIds] = await Promise.all([getRecentTrackIds(12), getSuppressedTrackIds()]);
         if (session !== autoSession.current) return;
         const replaceableIds = new Set(refresh ? queueRef.current.autoUpcoming.map((track) => track.id) : []);
+        const retained = queueRef.current.items.filter((track) => !replaceableIds.has(track.id));
         const candidates = await autoManager.current.refill(
-          new Set(queueRef.current.items.filter((track) => !replaceableIds.has(track.id)).map((track) => track.id)),
-          signals(recentIds, suppressedIds),
+          new Set(retained.map((track) => track.id)),
+          { ...signals(recentIds, suppressedIds), excludedSongKeys: new Set(retained.map(logicalSongKey)) },
           refresh ? 4 : 4 - queueRef.current.autoUpcoming.length
         );
         if (session !== autoSession.current || !LibraryService.getSettings().autoplayRelated || stopAtEndRef.current) return;
@@ -670,7 +672,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       queueRef.current.setTracks(list, startIndex, context?.label ?? '');
       if (LibraryService.getSettings().autoplayRelated && !stopAtEndRef.current) {
         queueRef.current.add(autoManager.current.immediate(
-          new Set(queueRef.current.items.map((item) => item.id)), signals()
+          new Set(queueRef.current.items.map((item) => item.id)),
+          { ...signals(), excludedSongKeys: new Set(queueRef.current.items.map(logicalSongKey)) }
         ));
       }
       bumpQueue();
@@ -757,6 +760,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
     void loadCurrent({ autoPlay: true });
   }, [bumpQueue, loadCurrent, persistQueue]);
+
+  useEffect(() => {
+    playbackEngine.on('onNext', () => { void next(); });
+    playbackEngine.on('onPrevious', previous);
+  }, [next, previous]);
 
   const seekTo = useCallback((seconds: number) => {
     void playbackEngine.seekTo(seconds);

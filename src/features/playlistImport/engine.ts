@@ -18,7 +18,7 @@ import { parsePlaylistUrl } from './url';
 export type EngineDependencies = {
   youtube: PlaylistSourceClient;
   spotify: PlaylistSourceClient;
-  searchTracks: (query: string, signal: AbortSignal) => Promise<Track[]>;
+  searchTracks: (query: string, signal: AbortSignal, filter?: 'Songs' | 'All') => Promise<Track[]>;
   getYouTubeTrack?: (videoId: string, signal: AbortSignal) => Promise<Track>;
 };
 
@@ -88,8 +88,8 @@ export class PlaylistImportEngine {
     let providerOutage = false;
     const stats = { normalizationMs: 0, rankingMs: 0, providerMs: 0, providerCalls: 0, queryCacheHits: 0, sourceCacheHits: 0 };
 
-    const search = (query: string): Promise<Track[]> => {
-      const key = normalizeMetadata(query);
+    const search = (query: string, filter: 'Songs' | 'All' = 'Songs'): Promise<Track[]> => {
+      const key = `${filter}:${normalizeMetadata(query)}`;
       const cached = queryCache.get(key);
       if (cached) { stats.queryCacheHits++; return cached; }
       stats.providerCalls++;
@@ -109,7 +109,7 @@ export class PlaylistImportEngine {
               reject(appErrorWithMessage('timeout', 'Search timed out.'));
             }, MATCH_QUERY_TIMEOUT_MS);
           });
-          const tracks = await Promise.race([this.dependencies.searchTracks(query, controller.signal), timeout, aborted]);
+          const tracks = await Promise.race([this.dependencies.searchTracks(query, controller.signal, filter), timeout, aborted]);
           consecutiveProviderFailures = 0;
           return tracks;
         } catch (error) {
@@ -164,6 +164,7 @@ export class PlaylistImportEngine {
         return ranked;
       };
       let best = rank(source);
+      let searchFailure: 'NETWORK_TIMEOUT' | 'PROVIDER_ERROR' | undefined;
       for (const query of queries) {
         if (signal.aborted) throw cancelled();
         if (providerOutage) return best.confidence === 'NO_MATCH' ? { ...best, failureReason: 'PROVIDER_ERROR' } : best;
@@ -174,9 +175,8 @@ export class PlaylistImportEngine {
           const appError = toAppError(error, 'provider_failed');
           if (typeof __DEV__ !== 'undefined' && __DEV__) console.warn('[playlist-import] MATCH', appError.kind);
           best = rank(source);
-          return best.confidence === 'NO_MATCH'
-            ? { ...best, failureReason: appError.kind === 'timeout' || appError.kind === 'network' ? 'NETWORK_TIMEOUT' : 'PROVIDER_ERROR' }
-            : best;
+          searchFailure = appError.kind === 'timeout' || appError.kind === 'network' ? 'NETWORK_TIMEOUT' : 'PROVIDER_ERROR';
+          break;
         }
         best = rank(source);
         if (source.alternate && best.confidence !== 'HIGH') {
@@ -185,7 +185,28 @@ export class PlaylistImportEngine {
         }
         if (best.confidence === 'HIGH') break;
       }
-      return best;
+      // The ordinary Search screen uses the provider's All filter. Songs-only
+      // results can omit uploads that Search can find, so try that same path
+      // once before declaring a metadata row unmatched.
+      if (best.confidence !== 'HIGH' && !providerOutage) {
+        try {
+          for (const track of await search(source.title, 'All')) candidates.set(track.id, track);
+          best = rank(source);
+          if (source.alternate && best.confidence !== 'HIGH') {
+            const alternate = rank({ ...source, ...source.alternate });
+            if ((alternate.alternatives[0]?.score ?? 0) > (best.alternatives[0]?.score ?? 0) + 0.01) best = alternate;
+          }
+        } catch (error) {
+          if (signal.aborted) throw cancelled();
+          const kind = toAppError(error, 'provider_failed').kind;
+          if (best.confidence === 'NO_MATCH') {
+            return { ...best, failureReason: kind === 'network' || kind === 'timeout' ? 'NETWORK_TIMEOUT' : 'PROVIDER_ERROR' };
+          }
+        }
+      }
+      return best.confidence === 'NO_MATCH' && searchFailure && !candidates.size
+        ? { ...best, failureReason: searchFailure }
+        : best;
     };
 
     const worker = async () => {

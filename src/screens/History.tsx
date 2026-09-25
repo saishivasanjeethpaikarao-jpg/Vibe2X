@@ -9,12 +9,12 @@ import { MiniPlayer } from '../components/player/MiniPlayer';
 import { StatusBarScrim } from '../components/common/StatusBarScrim';
 import { GlassCard } from '../components/common/GlassCard';
 import { Track } from '../core/types';
-import { HistoryEntry } from '../services/LibraryService';
+import { groupListeningHistory, ListeningHistoryRow } from '../core/listeningHistory';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { useNavigation } from '@react-navigation/native';
 
-type Section = { title: string; data: HistoryEntry[] };
+type Section = { title: string; data: ListeningHistoryRow[] };
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -31,7 +31,7 @@ const startOfDay = (ms: number): number => {
  * The log is already ordered, so one pass is enough and section order falls out
  * naturally -- no sorting per bucket.
  */
-function groupByDay(entries: HistoryEntry[]): Section[] {
+function groupByDay(entries: ListeningHistoryRow[]): Section[] {
   const today = startOfDay(Date.now());
   const sections: Section[] = [];
   let current: Section | null = null;
@@ -63,25 +63,31 @@ export default function HistoryScreen() {
   const { playTrack, currentTrack, isPlaying, togglePlayPause, next, addToQueue } = usePlayer();
   const { history, clearHistory } = useLibrary();
 
-  const sections = useMemo(() => groupByDay(history), [history]);
+  const grouped = useMemo(() => groupListeningHistory(history), [history]);
+  const sections = useMemo(() => groupByDay(grouped), [grouped]);
 
   /** Playing from history queues the rest of the log behind it. */
   const onPlay = useCallback(
     (track: Track) => {
-      const tracks = history.map((e) => e.track);
+      const tracks = grouped.map((e) => e.track);
       playTrack(track, { tracks, label: 'History' });
     },
-    [history, playTrack]
+    [grouped, playTrack]
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: HistoryEntry }) => (
-      <TrackRow onSwipeRight={addToQueue}
-        track={item.track}
-        onPress={onPlay}
-        onMorePress={setAddingTrack}
-        isPlaying={currentTrack?.id === item.track.id && isPlaying}
-      />
+    ({ item }: { item: ListeningHistoryRow }) => (
+      <View>
+        <TrackRow onSwipeRight={addToQueue}
+          track={item.track}
+          onPress={onPlay}
+          onMorePress={setAddingTrack}
+          isPlaying={currentTrack?.id === item.track.id && isPlaying}
+        />
+        <Text style={styles.listenMeta} accessibilityLabel={`${item.playCount} meaningful listens. Last listened ${new Date(item.playedAt).toLocaleString()}`}>
+          {item.playCount} {item.playCount === 1 ? 'listen' : 'listens'} · Last listened {new Date(item.playedAt).toLocaleString()}
+        </Text>
+      </View>
     ),
     [onPlay, currentTrack?.id, isPlaying]
   );
@@ -107,7 +113,7 @@ export default function HistoryScreen() {
         )}
       </View>
 
-      {history.length === 0 ? (
+      {grouped.length === 0 ? (
         <View style={styles.emptyWrap}>
           <GlassCard intensity={20} style={styles.emptyCard}>
             <Text style={styles.emptyText}>No listening history yet.</Text>
@@ -178,6 +184,13 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     paddingHorizontal: SIZES.md,
     paddingTop: SIZES.lg,
+    paddingBottom: SIZES.sm,
+  },
+  listenMeta: {
+    fontFamily: FONTS.regular,
+    fontSize: 12,
+    color: COLORS.text.secondary,
+    paddingHorizontal: SIZES.md,
     paddingBottom: SIZES.sm,
   },
   emptyWrap: {

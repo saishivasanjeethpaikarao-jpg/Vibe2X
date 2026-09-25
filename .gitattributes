@@ -1,0 +1,2 @@
+# Patch files contain unified-diff context markers that look like whitespace.
+patches/*.patch -whitespace

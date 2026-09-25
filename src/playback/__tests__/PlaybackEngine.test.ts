@@ -91,4 +91,22 @@ describe('PlaybackEngine transition confirmation', () => {
     );
     await engine.release();
   });
+
+  it('routes Android system navigation events to the shared playback controller', async () => {
+    Platform.OS = 'android';
+    const engine = new PlaybackEngine();
+    const next = vi.fn();
+    const previous = vi.fn();
+    engine.on('onNext', next);
+    engine.on('onPrevious', previous);
+    const loading = engine.load(track('A'), stream);
+    await vi.waitFor(() => expect(native.player.play).toHaveBeenCalledTimes(1));
+    native.listeners.forEach((listener) => listener({ isLoaded: true, playing: true, currentTime: 0, duration: 180 }));
+    await loading;
+    native.listeners.forEach((listener) => listener({ action: 'next' }));
+    native.listeners.forEach((listener) => listener({ action: 'previous' }));
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(previous).toHaveBeenCalledTimes(1);
+    await engine.release();
+  });
 });

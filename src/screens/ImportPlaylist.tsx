@@ -162,7 +162,9 @@ export default function ImportPlaylistScreen() {
     setPhase('matching');
     setProgress({ phase: 'matching', completed: 0, total: fetched.tracks.length });
     const resolved = await playlistImportEngine.matchMetadata(fetched, controller.signal, setProgress, (diagnostics) => {
-      if (__DEV__) console.info('[playlist-import] QA_MATCH', diagnostics);
+      if (__DEV__ || process.env.EXPO_PUBLIC_IMPORT_QA_TIMING === '1') {
+        console.info('[playlist-import] QA_MATCH', diagnostics);
+      }
     });
     if (controller.signal.aborted) return;
     setMatches(resolved);

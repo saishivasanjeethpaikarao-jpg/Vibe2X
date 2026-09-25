@@ -21,6 +21,15 @@ function engine(searchTracks: (query: string, signal: AbortSignal) => Promise<Tr
 }
 
 describe('bounded progressive metadata import', () => {
+  it('retries the ordinary Search filter when Songs-only results miss a findable track', async () => {
+    const found = track('Hidden in All');
+    const search = vi.fn(async (_query: string, _signal: AbortSignal, filter?: 'Songs' | 'All') =>
+      filter === 'All' ? [found] : []);
+    const result = await engine(search).matchMetadata(playlist(['Hidden in All']), new AbortController().signal);
+    expect(result[0].selectedTrack?.id).toBe(found.id);
+    expect(search).toHaveBeenCalledWith('Hidden in All', expect.anything(), 'All');
+  });
+
   it('uses a known YouTube video ID as metadata identity without searching or resolving a stream', async () => {
     const input = playlist(['Song']);
     input.tracks[0].sourceUrl = 'https://www.youtube.com/watch?v=abcdefghijk&si=share';

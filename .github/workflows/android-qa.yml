@@ -24,6 +24,8 @@ jobs:
       EXPO_PUBLIC_SPOTIFY_CLIENT_ID: ${{ vars.EXPO_PUBLIC_SPOTIFY_CLIENT_ID }}
       # Local logcat timing only; records stage durations, never stream URLs or tokens.
       EXPO_PUBLIC_PLAYBACK_QA_TIMING: '1'
+      # Numeric import stages/counts only; no playlist links, titles, or credentials.
+      EXPO_PUBLIC_IMPORT_QA_TIMING: '1'
 
     steps:
       - name: Check out source

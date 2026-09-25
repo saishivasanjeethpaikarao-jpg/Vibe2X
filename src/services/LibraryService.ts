@@ -131,7 +131,7 @@ class LibraryServiceImpl {
     }
     
     // Load history from SQLite
-    this.history = await getListenHistory(100);
+    this.history = await getListenHistory(MAX_HISTORY);
   }
 
   /** Subscribe to out-of-band changes. Returns an unsubscribe function. */

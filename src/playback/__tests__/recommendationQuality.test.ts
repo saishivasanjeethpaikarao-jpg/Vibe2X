@@ -88,6 +88,15 @@ describe('Smart Continue V2 quality fixtures (synthetic, no provider calls)', ()
     expect(rank([candidate(alternate), candidate(other)], signals).map((item) => item.track.id)).toEqual([other.id]);
   });
 
+  it('does not add the same logical song from related results beside an already queued upload', () => {
+    const queued = track('queued', 'Bairan', 'Banjaare');
+    const duplicate = track('other-upload', 'BAIRAN (LYRICS)', 'Banjaare');
+    const fresh = track('fresh', 'Another Song', 'Banjaare');
+    const result = rankContinuationDetailed(seed, [candidate(duplicate), candidate(fresh)],
+      new Set([seed.id, queued.id]), { ...empty, excludedSongKeys: new Set(['banjaare|bairan']) }, () => true);
+    expect(result.map((entry) => entry.track.id)).toEqual([fresh.id]);
+  });
+
   it('varies artists without losing the current vibe', () => {
     const result = rank([
       candidate(track('same1', 'Song One', 'Hindi Artist')),
