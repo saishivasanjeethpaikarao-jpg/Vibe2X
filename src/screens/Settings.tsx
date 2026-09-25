@@ -132,6 +132,7 @@ export default function SettingsScreen() {
         {/* ---- Playback ---- */}
         <Text style={styles.sectionLabel}>PLAYBACK</Text>
         <View style={styles.card}>
+          <NavigationRow label="Music Preferences" onPress={() => navigation.navigate('MusicPreferences' as never)} />
           <View style={[styles.infoRow, styles.smartContinueRow]}>
             <View style={styles.smartContinueText}>
               <Text style={styles.rowValue}>Smart Continue</Text>
@@ -144,6 +145,15 @@ export default function SettingsScreen() {
               accessibilityHint="Adds related songs after your manual Up Next and playlist tracks"
             />
           </View>
+          <View style={[styles.infoRow, styles.smartContinueRow]}>
+            <View style={styles.smartContinueText}>
+              <Text style={styles.rowValue}>AI-assisted suggestions</Text>
+              <Text style={styles.infoDescription}>Optional. Sends limited music context to Vibe2X's recommendation service when configured; otherwise uses on-device ranking.</Text>
+              {!process.env.EXPO_PUBLIC_RECOMMENDATION_ENDPOINT && <Text style={styles.infoDescription}>Not configured in this build.</Text>}
+            </View>
+            <Switch value={settings.aiRecommendationsEnabled} onValueChange={(value) => updateSettings({ aiRecommendationsEnabled: value })}
+              accessibilityLabel="AI-assisted suggestions" disabled={!process.env.EXPO_PUBLIC_RECOMMENDATION_ENDPOINT} />
+          </View>
         </View>
 
         {/* ---- Data ---- */}
@@ -155,7 +165,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>PRIVACY</Text>
         <View style={styles.card}>
           <Text style={styles.infoDescription}>
-            Your library, listening history, and settings are stored on this device. No Vibe2X account is required.
+            Your library, listening history, and preferences are stored on this device. No Vibe2X account is required. If you enable AI-assisted suggestions, limited song, session, and taste metadata may be sent to the Vibe2X recommendation service and its configured hosted AI provider. No name, email, or device identifier is sent.
           </Text>
         </View>
 

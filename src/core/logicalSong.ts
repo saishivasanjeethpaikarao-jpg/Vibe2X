@@ -1,7 +1,7 @@
 import { Track } from './types';
 
 /** Presentation labels are not musical editions. Keep remix/live/acoustic/etc. */
-const PRESENTATION = /\b(?:official\s+(?:music\s+)?(?:audio|video)|lyrics?(?:\s+video)?|full\s+video|audio\s+only|visuali[sz]er)\b/gi;
+const PRESENTATION = /\b(?:official\s+(?:music\s+)?(?:audio|video)|lyrics?(?:\s+video)?|full\s+video|audio\s+only|visuali[sz]er|whatsapp\s+status|status\s+video|hd|4k)\b/gi;
 
 export function normalizedSongText(value: string): string {
   return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase()

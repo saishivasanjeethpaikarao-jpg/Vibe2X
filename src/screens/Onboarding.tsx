@@ -6,7 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { FONTS, SIZES, THEME } from '../constants/theme';
 
-type RootStackParamList = { Main: undefined; ProfileSetup: undefined };
+type RootStackParamList = { Main: undefined; TasteSetup: undefined };
 
 /** The real production mark is animated by the readiness overlay above this route. */
 export default function OnboardingScreen() {
@@ -23,7 +23,7 @@ export default function OnboardingScreen() {
       <View style={styles.actionBlock}>
         <TouchableOpacity
           style={styles.button}
-          onPress={() => navigation.replace('ProfileSetup')}
+          onPress={() => navigation.replace('TasteSetup')}
           accessibilityRole="button"
           accessibilityLabel="Get started with Vibe2X"
         >

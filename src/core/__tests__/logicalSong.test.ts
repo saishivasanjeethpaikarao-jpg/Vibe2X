@@ -10,7 +10,7 @@ const track = (title: string, artist = 'Banjaare'): Track => ({
 describe('logical song identity', () => {
   it('deduplicates presentation variants and a matching artist suffix', () => {
     const original = logicalSongKey(track('Bairan'));
-    for (const title of ['BAIRAN (LYRICS)', 'Bairan - Banjaare', 'Bairan [Official Audio]', 'Bairan - Full Video']) {
+    for (const title of ['BAIRAN (LYRICS)', 'Bairan - Banjaare', 'Bairan [Official Audio]', 'Bairan - Full Video', 'Bairan WhatsApp Status', 'Bairan HD']) {
       expect(logicalSongKey(track(title))).toBe(original);
     }
   });

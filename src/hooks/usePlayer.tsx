@@ -21,6 +21,7 @@ import { MusicService } from '../services/MusicService';
 import { getSuppressedTrackIds, getRecentTrackIds } from '../core/lie';
 import { logicalSongKey } from '../core/logicalSong';
 import { AutoContinueManager, RecommendationSignals } from '../playback/AutoContinueManager';
+import { RemoteAIReranker } from '../playback/RecommendationReranker';
 import {
   feedbackFor,
   LONG_WAIT_FEEDBACK_MS,
@@ -120,13 +121,14 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     related: (track, signal) => MusicService.getRelated(track, signal),
     search: async (query, signal) => (await MusicService.search(query, { signal, filter: 'Songs', limit: 20 })).tracks,
     canPlay: (track) => MusicService.canPlay(track),
-  }));
+  }, process.env.EXPO_PUBLIC_RECOMMENDATION_ENDPOINT ? new RemoteAIReranker(process.env.EXPO_PUBLIC_RECOMMENDATION_ENDPOINT) : undefined));
   const autoSession = useRef(0);
   const autoFill = useRef<Promise<void> | null>(null);
   const lastAutoEnabled = useRef<boolean | null>(null);
   const sessionSkippedIds = useRef(new Set<string>());
   const refreshAfterNext = useRef(false);
   const lastLikedSignature = useRef<string | null>(null);
+  const lastTasteSignature = useRef<string | null>(null);
   const confirmedTrack = useRef<Track | null>(null);
 
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
@@ -232,6 +234,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       searches: LibraryService.getSearchHistory(),
       recentIds: new Set([...recentIds, ...history.filter((entry) => entry.playedAt >= cutoff).map((entry) => entry.track.id)]),
       suppressedIds: new Set([...suppressedIds, ...sessionSkippedIds.current]),
+      preferences: LibraryService.getSettings().musicPreferences,
+      useAIReranking: LibraryService.getSettings().aiRecommendationsEnabled,
     };
   }, []);
 
@@ -278,8 +282,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const session = autoSession.current;
     const current = autoFill.current;
     if (current) {
-      // In-flight discovery reads the latest session signals when it ranks.
-      if (queueRef.current.autoUpcoming.length === 0) return;
+      // A settings edit may arrive while discovery is in flight. The current
+      // request already captured old signals, so refresh once it settles.
       void current.finally(() => {
         if (session === autoSession.current) void fillAuto(true);
       });
@@ -288,10 +292,20 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   useEffect(() => {
     lastLikedSignature.current = LibraryService.getLiked().map((track) => track.id).sort().join('|');
+    lastTasteSignature.current = JSON.stringify({
+      preferences: LibraryService.getSettings().musicPreferences,
+      ai: LibraryService.getSettings().aiRecommendationsEnabled,
+    });
     return LibraryService.subscribe(() => {
       const likedSignature = LibraryService.getLiked().map((track) => track.id).sort().join('|');
       if (lastLikedSignature.current !== null && likedSignature !== lastLikedSignature.current) refreshAuto();
       lastLikedSignature.current = likedSignature;
+      const tasteSignature = JSON.stringify({
+        preferences: LibraryService.getSettings().musicPreferences,
+        ai: LibraryService.getSettings().aiRecommendationsEnabled,
+      });
+      if (lastTasteSignature.current !== null && tasteSignature !== lastTasteSignature.current) refreshAuto();
+      lastTasteSignature.current = tasteSignature;
       const enabled = LibraryService.getSettings().autoplayRelated;
       if (lastAutoEnabled.current === enabled) return;
       lastAutoEnabled.current = enabled;

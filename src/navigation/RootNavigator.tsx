@@ -6,6 +6,8 @@ import { COLORS } from '../constants/theme';
 import { useLibrary } from '../hooks/useLibrary';
 import OnboardingScreen from '../screens/Onboarding';
 import ProfileSetupScreen from '../screens/ProfileSetup';
+import TasteSetupScreen from '../screens/TasteSetup';
+import MusicPreferencesScreen from '../screens/MusicPreferences';
 import PlaylistDetailScreen from '../screens/PlaylistDetail';
 import SettingsScreen from '../screens/Settings';
 import AboutVibe2XScreen from '../screens/AboutVibe2X';
@@ -48,10 +50,12 @@ export const RootNavigator = () => {
     >
       <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
         <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+        <Stack.Screen name="TasteSetup" component={TasteSetupScreen} />
         <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
         <Stack.Screen name="Main" component={TabNavigator} />
         <Stack.Screen name="Playlist" component={PlaylistDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="MusicPreferences" component={MusicPreferencesScreen} />
         <Stack.Screen name="AboutVibe2X" component={AboutVibe2XScreen} />
         <Stack.Screen name="LegalCredits" component={LegalCreditsScreen} />
         <Stack.Screen

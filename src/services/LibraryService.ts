@@ -9,6 +9,7 @@ import { appErrorWithMessage } from '../core/errors';
 import { Playlist, Track } from '../core/types';
 import { getListenHistory, logPlay, clearListenHistory, batchLogPlays, HistoryEntry } from '../core/lie';
 import { addSearchHistory, normalizeSearchHistory, removeSearchHistory } from '../core/searchHistory';
+import { DEFAULT_MUSIC_PREFERENCES, MusicPreferences, normalizeMusicPreferences } from '../core/musicPreferences';
 
 export { HistoryEntry };
 export type Gender = 'male' | 'female' | 'unspecified';
@@ -36,6 +37,9 @@ export type AppSettings = {
   preferAudioOnly: boolean;
   /** Keep the queue rolling with related tracks when it runs out. */
   autoplayRelated: boolean;
+  musicPreferences: MusicPreferences;
+  /** Optional remote ranking; deterministic Smart Continue works without it. */
+  aiRecommendationsEnabled: boolean;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -44,6 +48,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   volume: 1,
   preferAudioOnly: true,
   autoplayRelated: true,
+  musicPreferences: DEFAULT_MUSIC_PREFERENCES,
+  aiRecommendationsEnabled: false,
 };
 
 export type SavedPlaybackState = {
@@ -120,6 +126,8 @@ class LibraryServiceImpl {
       ...DEFAULT_SETTINGS,
       ...stored,
       profile: { ...DEFAULT_PROFILE, ...(stored.profile ?? {}) },
+      musicPreferences: normalizeMusicPreferences(stored.musicPreferences),
+      aiRecommendationsEnabled: stored.aiRecommendationsEnabled === true,
     };
     this.searchHistory = normalizeSearchHistory(Array.isArray(searchHistoryRaw) ? searchHistoryRaw : []);
     
@@ -430,10 +438,28 @@ class LibraryServiceImpl {
   }
 
   updateSettings(patch: Partial<AppSettings>): AppSettings {
-    this.settings = { ...this.settings, ...patch };
+    this.settings = { ...this.settings, ...patch,
+      musicPreferences: patch.musicPreferences ? normalizeMusicPreferences(patch.musicPreferences) : this.settings.musicPreferences,
+    };
     void writeJson(STORAGE_KEYS.settings, this.settings);
     this.notifyChanged();
     return this.getSettings();
+  }
+
+  async saveMusicPreferences(patch: Partial<MusicPreferences>): Promise<MusicPreferences> {
+    const previous = this.settings.musicPreferences;
+    const next = normalizeMusicPreferences({ ...previous, ...patch, updatedAt: Date.now() });
+    this.settings = { ...this.settings, musicPreferences: next };
+    const saved = await writeJson(STORAGE_KEYS.settings, this.settings);
+    if (!saved) {
+      this.settings = { ...this.settings, musicPreferences: previous };
+      // Replace the storage adapter's pending failed write as well; otherwise
+      // a later flush could persist a choice that the UI reported as failed.
+      await writeJson(STORAGE_KEYS.settings, this.settings);
+      throw new Error('Could not save music preferences');
+    }
+    this.notifyChanged();
+    return next;
   }
 }
 

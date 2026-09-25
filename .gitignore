@@ -32,6 +32,8 @@ yarn-error.*
 
 # local env files
 .env*.local
+**/.dev.vars*
+recommendation-service/.env*
 
 # typescript
 *.tsbuildinfo

@@ -8,6 +8,7 @@ import React, {
   ReactNode,
 } from 'react';
 import { Playlist, Track } from '../core/types';
+import { MusicPreferences } from '../core/musicPreferences';
 import { endpointSource } from '../providers/stream/StreamResolver';
 import {
   AppSettings,
@@ -47,6 +48,7 @@ type LibraryContextType = {
   ) => Playlist;
 
   updateSettings: (patch: Partial<AppSettings>) => void;
+  saveMusicPreferences: (patch: Partial<MusicPreferences>) => Promise<MusicPreferences>;
 
   /** Local-only profile from Get Started. */
   profile: UserProfile;
@@ -216,6 +218,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       endpointSource.setEndpoints(updated.resolverEndpoints);
     }
   }, []);
+  const saveMusicPreferences = useCallback((patch: Partial<MusicPreferences>) => LibraryService.saveMusicPreferences(patch), []);
 
   /**
    * "Liked Songs" is presented as a playlist but is really the liked list, so
@@ -255,6 +258,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       removeFromPlaylist,
       createImportedPlaylist,
       updateSettings,
+      saveMusicPreferences,
 
       profile: settings.profile,
       saveProfile,
@@ -279,6 +283,7 @@ export const LibraryProvider: React.FC<{ children: ReactNode }> = ({ children })
       removeFromPlaylist,
       createImportedPlaylist,
       updateSettings,
+      saveMusicPreferences,
       saveProfile,
       likedPlaylist,
     ]

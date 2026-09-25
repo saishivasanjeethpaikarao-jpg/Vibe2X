@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "vibe2x-recommendations",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-25",
+  "secrets": { "required": ["AI_API_KEY", "AI_PROVIDER_URL", "AI_MODEL"] },
+  "ratelimits": [
+    { "name": "RECOMMEND_LIMIT", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }
+  ]
+}
