@@ -23,6 +23,8 @@ jobs:
       CI: '1'
       LANG: en_US.UTF-8
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      # Public Worker URL only. The Groq API key stays in Cloudflare Worker secrets.
+      EXPO_PUBLIC_RECOMMENDATION_ENDPOINT: https://vibe2x-recommendations.saishivasanjeethpaikarao.workers.dev/recommend
 
     steps:
       - name: Check out source
