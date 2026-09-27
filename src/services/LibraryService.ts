@@ -40,6 +40,8 @@ export type AppSettings = {
   musicPreferences: MusicPreferences;
   /** Optional remote ranking; deterministic Smart Continue works without it. */
   aiRecommendationsEnabled: boolean;
+  wifiOnlyDownloads: boolean;
+  offlineMode: boolean;
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -50,6 +52,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoplayRelated: true,
   musicPreferences: DEFAULT_MUSIC_PREFERENCES,
   aiRecommendationsEnabled: false,
+  wifiOnlyDownloads: true,
+  offlineMode: false,
 };
 
 export type SavedPlaybackState = {

@@ -133,6 +133,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>PLAYBACK</Text>
         <View style={styles.card}>
           <NavigationRow label="Music Preferences" onPress={() => navigation.navigate('MusicPreferences' as never)} />
+          <NavigationRow label="Downloads & Storage" onPress={() => navigation.navigate('DownloadsStorage' as never)} />
           <View style={[styles.infoRow, styles.smartContinueRow]}>
             <View style={styles.smartContinueText}>
               <Text style={styles.rowValue}>Smart Continue</Text>

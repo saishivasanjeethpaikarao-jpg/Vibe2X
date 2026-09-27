@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Check, Heart, ListMusic, ListPlus, Plus, X, Ban } from 'lucide-react-native';
+import { Check, Heart, ListMusic, ListPlus, Plus, X, Ban, Download } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS } from '../../constants/theme';
 import { Track } from '../../core/types';
 import { useLibrary } from '../../hooks/useLibrary';
@@ -18,6 +18,8 @@ import { confirmLocalMutation } from '../../core/confirmedMutation';
 import { useSnackbar } from '../common/SnackbarContext';
 import { usePlayer } from '../../hooks/usePlayer';
 import { addWithQueueFeedback } from './queueSwipe';
+import { downloadManager, offlineMediaService } from '../../offline/runtime';
+import { useOfflineDownloads } from '../../hooks/useOfflineDownloads';
 
 type Props = {
   /** The track being filed. Null closes the sheet. */
@@ -34,6 +36,7 @@ type Props = {
  */
 export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
   const { show } = useSnackbar();
+  const { records } = useOfflineDownloads(track !== null);
   const { addToQueue } = usePlayer();
   const {
     playlists,
@@ -67,6 +70,15 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
   }, []);
 
   const liked = track ? isLiked(track.id) : false;
+  const capability = track ? offlineMediaService.capability(track) : 'STREAMING_ONLY';
+  const downloadRecord = track ? records.find((record) => record.trackId === track.id) : undefined;
+  const downloadLabel = capability === 'LOCAL' ? 'Available offline'
+    : capability !== 'AUTHORIZED_DOWNLOAD' ? 'Streaming only'
+      : downloadRecord?.status === 'completed' ? 'Downloaded'
+        : downloadRecord?.status === 'downloading' || downloadRecord?.status === 'queued' ? 'Downloading…'
+          : downloadRecord?.status === 'failed' ? 'Retry download' : 'Download';
+  const canDownload = capability === 'AUTHORIZED_DOWNLOAD' &&
+    downloadRecord?.status !== 'completed' && downloadRecord?.status !== 'downloading' && downloadRecord?.status !== 'queued';
 
   /** Newest-first, matching how Library orders them. */
   const ordered = useMemo(
@@ -199,6 +211,25 @@ export const AddToPlaylistSheet: React.FC<Props> = ({ track, onClose }) => {
         )}
 
         <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+          <TouchableOpacity
+            style={styles.row}
+            disabled={!canDownload}
+            onPress={() => {
+              if (!track) return;
+              const selected = track;
+              close();
+              void downloadManager.download([selected]).then((summary) => {
+                show(summary.failed ? 'Download failed. You can retry.'
+                  : summary.cancelled ? 'Download cancelled' : 'Available offline');
+              }).catch(() => show('Could not start download'));
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={downloadLabel}
+            accessibilityState={{ disabled: !canDownload }}
+          >
+            <View style={styles.rowIcon}><Download color={canDownload ? COLORS.text.primary : COLORS.text.secondary} size={20} /></View>
+            <Text style={[styles.rowLabel, !canDownload && { color: COLORS.text.secondary }]}>{downloadLabel}</Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={styles.row}
             activeOpacity={0.7}

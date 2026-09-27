@@ -15,6 +15,7 @@ import LegalCreditsScreen from '../screens/LegalCredits';
 import NowPlayingScreen from '../screens/NowPlaying';
 import QueueScreen from '../screens/QueueScreen';
 import ImportPlaylistScreen from '../screens/ImportPlaylist';
+import DownloadsStorageScreen from '../screens/DownloadsStorage';
 
 const Stack = createNativeStackNavigator();
 
@@ -55,6 +56,7 @@ export const RootNavigator = () => {
         <Stack.Screen name="Main" component={TabNavigator} />
         <Stack.Screen name="Playlist" component={PlaylistDetailScreen} />
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="DownloadsStorage" component={DownloadsStorageScreen} />
         <Stack.Screen name="MusicPreferences" component={MusicPreferencesScreen} />
         <Stack.Screen name="AboutVibe2X" component={AboutVibe2XScreen} />
         <Stack.Screen name="LegalCredits" component={LegalCreditsScreen} />

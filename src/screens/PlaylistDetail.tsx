@@ -10,7 +10,7 @@ import {
   Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, Play, Shuffle, ListPlus, ExternalLink } from 'lucide-react-native';
+import { ChevronLeft, Play, Shuffle, ListPlus, ExternalLink, Download } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { COLORS, SIZES, FONTS, THEME, TYPE } from '../constants/theme';
 import { TrackRow } from '../components/lists/TrackRow';
@@ -22,6 +22,9 @@ import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { ArtworkAtmosphere } from '../components/liquid/ArtworkAtmosphere';
 import { LikedSongsCover } from '../components/common/LikedSongsCover';
+import { downloadManager } from '../offline/runtime';
+import { useOfflineDownloads } from '../hooks/useOfflineDownloads';
+import { useSnackbar } from '../components/common/SnackbarContext';
 
 type PlaylistRouteParams = { playlistId: string };
 type PlaylistRoute = RouteProp<{ Playlist: PlaylistRouteParams }, 'Playlist'>;
@@ -39,6 +42,9 @@ export default function PlaylistDetailScreen() {
   const navigation = useNavigation();
   const route = useRoute<PlaylistRoute>();
   const { playlistId } = route.params;
+  const { records } = useOfflineDownloads();
+  const { show } = useSnackbar();
+  const [bulkDownloading, setBulkDownloading] = useState(false);
 
   const { playlists, likedPlaylist } = useLibrary();
   const {
@@ -61,6 +67,29 @@ export default function PlaylistDetailScreen() {
   );
 
   const tracks = playlist?.tracks ?? [];
+  const downloadCoverage = downloadManager.preview(tracks);
+  const downloadIds = new Set(tracks.map((track) => track.id));
+  const bulkCompleted = records.filter((record) => downloadIds.has(record.trackId) && record.status === 'completed').length;
+  const bulkActive = records.filter((record) => downloadIds.has(record.trackId) && record.status === 'downloading').length;
+
+  const startBulkDownload = () => {
+    if (!playlist || !tracks.length) return;
+    const { eligible, streamingOnly, alreadyAvailable } = downloadCoverage;
+    if (!eligible) {
+      Alert.alert('No new downloads available', `${alreadyAvailable} already available offline. ${streamingOnly} streaming only.`);
+      return;
+    }
+    Alert.alert(`Download ${eligible} available songs?`,
+      `${streamingOnly} ${streamingOnly === 1 ? 'track is' : 'tracks are'} streaming-only. ${alreadyAvailable} already available offline.`, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Download', onPress: () => {
+          setBulkDownloading(true);
+          void downloadManager.download(tracks).then((summary) => {
+            show(`${summary.completed} available offline • ${summary.streamingOnly} streaming only${summary.failed ? ` • ${summary.failed} failed` : ''}`);
+          }).catch(() => show('Could not start downloads')).finally(() => setBulkDownloading(false));
+        } },
+      ]);
+  };
   const artworkUrl =
     playlist?.coverImageUrl && playlist.coverImageUrl !== 'liked_songs_gradient'
       ? playlist.coverImageUrl
@@ -210,6 +239,11 @@ export default function PlaylistDetailScreen() {
           <ListPlus color={COLORS.text.primary} size={20} />
         </TouchableOpacity>
       </View>
+      <TouchableOpacity style={styles.downloadAction} onPress={startBulkDownload} disabled={bulkDownloading || downloadCoverage.eligible === 0} accessibilityRole="button" accessibilityLabel={`Download available songs from ${playlist.name}`} accessibilityState={{ disabled: bulkDownloading || downloadCoverage.eligible === 0 }}>
+        <Download color={downloadCoverage.eligible ? COLORS.text.primary : COLORS.text.secondary} size={18} />
+        <Text style={[styles.downloadActionText, !downloadCoverage.eligible && { color: COLORS.text.secondary }]}>{bulkDownloading ? `Downloading… ${bulkCompleted} complete, ${bulkActive} active` : downloadCoverage.eligible ? 'Download available songs' : 'No downloads available'}</Text>
+      </TouchableOpacity>
+      <Text style={styles.downloadCoverage}>{downloadCoverage.eligible} downloadable • {downloadCoverage.alreadyAvailable} already offline • {downloadCoverage.streamingOnly} streaming only</Text>
     </View>
   );
 
@@ -384,6 +418,9 @@ const styles = StyleSheet.create({
   actionDisabled: {
     opacity: 0.4,
   },
+  downloadAction: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: SIZES.sm, alignSelf: 'flex-start', marginTop: SIZES.md },
+  downloadActionText: { fontFamily: FONTS.medium, fontSize: 14, color: COLORS.text.primary },
+  downloadCoverage: { fontFamily: FONTS.regular, fontSize: 12, color: COLORS.text.secondary, marginBottom: SIZES.md },
   emptyCard: {
     marginHorizontal: SIZES.md,
     padding: SIZES.lg,

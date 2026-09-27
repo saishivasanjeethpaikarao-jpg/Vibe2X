@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronDown, Music, Search, ListPlus, Sparkles, GripVertical } from 'lucide-react-native';
+import { ChevronDown, Music, Search, ListPlus, Sparkles, GripVertical, MoreVertical } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS, THEME } from '../constants/theme';
 import { Track } from '../core/types';
 import { QueueEntry } from '../playback/queue';
@@ -17,21 +17,26 @@ import { useNavigation } from '@react-navigation/native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 // @ts-ignore
 import Swipeable from 'react-native-gesture-handler/Swipeable';
+import { LiquidSheet } from '../components/liquid/LiquidSheet';
+import { useSnackbar } from '../components/common/SnackbarContext';
+import { offlineMediaService } from '../offline/runtime';
+import { manualDropTarget, QueueDragItem } from './queueDrag';
 
-type QueueItem =
-  | { type: 'header'; id: string; title: string }
-  | { type: 'track'; id: string; track: Track; origin: QueueEntry['origin']; originalIndex: number };
+type QueueItem = QueueDragItem;
 
 export default function QueueScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { createPlaylist, settings } = useLibrary();
+  const { show } = useSnackbar();
+  const [selectedManual, setSelectedManual] = useState<Track | null>(null);
   const {
     currentTrack,
     upcomingEntries,
     queueContext,
     jumpTo,
-    removeFromQueue,
+    removeManualUpcoming,
+    playNext,
     clearQueue,
     reorderQueue,
     isPreparingAuto,
@@ -58,11 +63,16 @@ export default function QueueScreen() {
   const contextCount = upcomingEntries.filter((entry) => entry.origin === 'context').length;
   const autoCount = upcomingEntries.filter((entry) => entry.origin === 'smartContinue').length;
 
+  const removeManual = (track: Track) => {
+    if (removeManualUpcoming(track.id)) show('Removed from queue');
+    setSelectedManual(null);
+  };
+
   const renderRightActions = (item: Track) => {
     return (
       <TouchableOpacity
         style={styles.deleteAction}
-        onPress={() => removeFromQueue(item.id)}
+        onPress={() => removeManual(item)}
         accessibilityRole="button"
         accessibilityLabel={`Remove ${item.title} from queue`}
       >
@@ -71,12 +81,12 @@ export default function QueueScreen() {
     );
   };
 
-  const renderUpcomingTrack = ({ item, drag, isActive, getIndex }: RenderItemParams<QueueItem>) => {
+  const renderUpcomingTrack = ({ item, drag, isActive }: RenderItemParams<QueueItem>) => {
     if (item.type === 'header') {
       return (
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionLabel}>{item.title}</Text>
-          {item.id === 'header-auto' && (
+          {item.id.startsWith('header-smartContinue') && (
             <Sparkles size={14} color={COLORS.accent.violet} style={styles.sectionIcon} />
           )}
         </View>
@@ -85,69 +95,73 @@ export default function QueueScreen() {
 
     const { track, origin, originalIndex } = item;
     const isAuto = origin === 'smartContinue';
-    const isContext = origin === 'context';
-    const firstInSection = isAuto ? manualCount + contextCount : isContext ? manualCount : 0;
-    const lastInSection = isAuto ? upcomingEntries.length - 1 : isContext ? manualCount + contextCount - 1 : manualCount - 1;
-    const reorderActions = [
-      ...(originalIndex > firstInSection ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
-      ...(originalIndex >= 0 && originalIndex < lastInSection
+    const isManual = origin === 'manual';
+    const reorderActions = isManual ? [
+      ...(originalIndex > 0 ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
+      ...(originalIndex < manualCount - 1
         ? [{ name: 'moveDown' as const, label: 'Move later' }]
         : []),
-    ];
+    ] : [];
 
-    return (
+    const row = (
+      <View style={[
+        styles.trackRow,
+        isActive && styles.trackRowActive,
+        isAuto && styles.trackRowAuto,
+      ]}>
+        <TouchableOpacity
+          style={styles.trackRowMain}
+          activeOpacity={0.7}
+          onPress={() => jumpTo(track.id)}
+          disabled={settings.offlineMode && !offlineMediaService.isAvailable(track)}
+          accessibilityRole="button"
+          accessibilityLabel={`Play ${track.title} by ${track.artist.name}`}
+          accessibilityState={{ disabled: settings.offlineMode && !offlineMediaService.isAvailable(track) }}
+        >
+          <Image source={{ uri: track.albumImageUrl }} style={styles.trackThumb} />
+          <View style={styles.trackInfo}>
+            <Text style={styles.trackTitle} numberOfLines={1}>{track.title}</Text>
+            <Text style={styles.trackArtist} numberOfLines={1}>{settings.offlineMode && !offlineMediaService.isAvailable(track) ? `${track.artist.name} • Streaming only` : track.artist.name}</Text>
+          </View>
+        </TouchableOpacity>
+        {isManual && <TouchableOpacity
+          style={styles.dragHandle}
+          onLongPress={drag}
+          delayLongPress={180}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={`Reorder ${track.title}`}
+          accessibilityHint="Long press and drag, or use accessibility actions"
+          accessibilityActions={reorderActions}
+          onAccessibilityAction={(event) => {
+            if (event.nativeEvent.actionName === 'moveUp') reorderQueue(track.id, originalIndex - 1);
+            if (event.nativeEvent.actionName === 'moveDown') reorderQueue(track.id, originalIndex + 1);
+          }}
+        >
+          <GripVertical color={COLORS.text.muted} size={20} />
+        </TouchableOpacity>}
+        {isManual && <TouchableOpacity
+          style={styles.dragHandle}
+          onPress={() => setSelectedManual(track)}
+          accessibilityRole="button"
+          accessibilityLabel={`Queue actions for ${track.title}`}
+        >
+          <MoreVertical color={COLORS.text.secondary} size={20} />
+        </TouchableOpacity>}
+      </View>
+    );
+
+    return isManual ? (
       <Swipeable
         renderRightActions={() => renderRightActions(track)}
         overshootRight={false}
+        rightThreshold={64}
+        friction={2}
         containerStyle={{ overflow: 'visible' }}
       >
-        <View style={[
-          styles.trackRow,
-          isActive && styles.trackRowActive,
-          isAuto && styles.trackRowAuto,
-        ]}>
-          <TouchableOpacity
-            style={styles.trackRowMain}
-            activeOpacity={0.7}
-            onPress={() => jumpTo(track.id)}
-            accessibilityRole="button"
-            accessibilityLabel={`Play ${track.title} by ${track.artist.name}`}
-          >
-            <Image source={{ uri: track.albumImageUrl }} style={styles.trackThumb} />
-            <View style={styles.trackInfo}>
-              <View style={styles.titleRow}>
-                <Text style={styles.trackTitle} numberOfLines={1}>{track.title}</Text>
-              </View>
-              <Text style={styles.trackArtist} numberOfLines={1}>{track.artist.name}</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.dragHandle}
-            onLongPress={drag}
-            delayLongPress={150}
-            activeOpacity={0.7}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-            accessibilityRole="button"
-            accessibilityLabel={`Reorder ${track.title}`}
-            accessibilityHint="Long press and drag, or use accessibility actions"
-            accessibilityActions={reorderActions}
-            onAccessibilityAction={(event) => {
-              if (originalIndex < 0) return;
-              if (event.nativeEvent.actionName === 'moveUp' && originalIndex > firstInSection) {
-                reorderQueue(originalIndex, originalIndex - 1);
-              } else if (
-                event.nativeEvent.actionName === 'moveDown' &&
-                originalIndex < lastInSection
-              ) {
-                reorderQueue(originalIndex, originalIndex + 1);
-              }
-            }}
-          >
-            <GripVertical color={COLORS.text.muted} size={20} />
-          </TouchableOpacity>
-        </View>
+        {row}
       </Swipeable>
-    );
+    ) : row;
   };
 
   return (
@@ -277,30 +291,22 @@ export default function QueueScreen() {
             style={styles.list}
             contentContainerStyle={{ paddingBottom: insets.bottom + SIZES.xxl }}
             showsVerticalScrollIndicator={false}
-            onDragEnd={({ data: newData, from, to }) => {
-              if (from === to) return;
-
-              const oldTracks = queueData.filter(x => x.type === 'track');
-              const newTracks = newData.filter(x => x.type === 'track');
-
-              const movedItem = queueData[from];
-              if (movedItem.type === 'header') return; // Should not happen since no drag handle for header
-
-              const originalFrom = oldTracks.findIndex(t => t.id === movedItem.id);
-              const originalTo = newTracks.findIndex(t => t.id === movedItem.id);
-              const staysInSection = movedItem.origin === 'smartContinue'
-                ? originalTo >= manualCount + contextCount
-                : movedItem.origin === 'context'
-                  ? originalTo >= manualCount && originalTo < manualCount + contextCount
-                  : originalTo < manualCount;
-
-              if (staysInSection && originalFrom !== -1 && originalTo !== -1 && originalFrom !== originalTo) {
-                reorderQueue(originalFrom, originalTo);
-              }
+            activationDistance={12}
+            onDragEnd={({ data: newData, from }) => {
+              const target = manualDropTarget(queueData, newData, from);
+              if (target) reorderQueue(target.trackId, target.toIndex);
             }}
           />
         )}
       </View>
+      <LiquidSheet visible={selectedManual !== null} onClose={() => setSelectedManual(null)} accessibilityLabel="Queue actions">
+        <Text style={styles.sheetTitle} numberOfLines={1}>{selectedManual?.title}</Text>
+        {selectedManual && <>
+          <TouchableOpacity style={styles.sheetAction} onPress={() => { playNext(selectedManual); setSelectedManual(null); }} accessibilityRole="button"><Text style={styles.sheetActionText}>Play next</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.sheetAction} onPress={() => { reorderQueue(selectedManual.id, 0); setSelectedManual(null); }} accessibilityRole="button"><Text style={styles.sheetActionText}>Move to top</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.sheetAction} onPress={() => removeManual(selectedManual)} accessibilityRole="button"><Text style={styles.sheetActionText}>Remove from queue</Text></TouchableOpacity>
+        </>}
+      </LiquidSheet>
     </View>
   );
 }
@@ -522,4 +528,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  sheetTitle: { fontFamily: FONTS.medium, fontSize: 16, color: COLORS.text.primary, marginBottom: SIZES.sm },
+  sheetAction: { minHeight: 48, justifyContent: 'center', paddingHorizontal: SIZES.sm },
+  sheetActionText: { fontFamily: FONTS.medium, fontSize: 15, color: COLORS.text.primary },
 });

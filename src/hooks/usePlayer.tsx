@@ -33,6 +33,7 @@ import {
 } from '../playback/transition';
 import { PlaybackTiming } from '../playback/timing';
 import { streamResolver } from '../providers/stream/StreamResolver';
+import { downloadManager, offlineMediaService } from '../offline/runtime';
 
 type PlayerContextType = {
   // --- core player state used by every screen ---
@@ -78,7 +79,8 @@ type PlayerContextType = {
   addToQueue: (tracks: Track | Track[]) => boolean;
   playNext: (tracks: Track | Track[]) => void;
   removeFromQueue: (trackId: string) => void;
-  reorderQueue: (from: number, to: number) => void;
+  removeManualUpcoming: (trackId: string) => boolean;
+  reorderQueue: (trackId: string, toManualIndex: number) => boolean;
   clearQueue: () => void;
   jumpTo: (trackId: string) => void;
 
@@ -125,6 +127,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const autoSession = useRef(0);
   const autoFill = useRef<Promise<void> | null>(null);
   const lastAutoEnabled = useRef<boolean | null>(null);
+  const lastOfflineEnabled = useRef<boolean | null>(null);
   const sessionSkippedIds = useRef(new Set<string>());
   const refreshAfterNext = useRef(false);
   const lastLikedSignature = useRef<string | null>(null);
@@ -225,6 +228,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     writeJsonDebounced(STORAGE_KEYS.queue, queueRef.current.snapshot(), 600);
   }, []);
 
+  const scheduleNext = useCallback(() => {
+    if (LibraryService.getSettings().offlineMode) preloader.cancel();
+    else preloader.schedule(queueRef.current.peekNext());
+  }, []);
+
   const signals = useCallback((recentIds = new Set<string>(), suppressedIds = new Set<string>()): RecommendationSignals => {
     const history = LibraryService.getHistory();
     const cutoff = Date.now() - 12 * 60 * 60 * 1000;
@@ -240,7 +248,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, []);
 
   const fillAuto = useCallback((refresh = false): Promise<void> => {
-    if (!LibraryService.getSettings().autoplayRelated || !queueRef.current.current || stopAtEndRef.current) return Promise.resolve();
+    if (!LibraryService.getSettings().autoplayRelated || LibraryService.getSettings().offlineMode || !queueRef.current.current || stopAtEndRef.current) return Promise.resolve();
     if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return Promise.resolve();
     const automaticCount = queueRef.current.autoUpcoming.length;
     if (!refresh && automaticCount >= 3) return Promise.resolve();
@@ -258,17 +266,17 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
           { ...signals(recentIds, suppressedIds), excludedSongKeys: new Set(retained.map(logicalSongKey)) },
           refresh ? 4 : 4 - queueRef.current.autoUpcoming.length
         );
-        if (session !== autoSession.current || !LibraryService.getSettings().autoplayRelated || stopAtEndRef.current) return;
+        if (session !== autoSession.current || !LibraryService.getSettings().autoplayRelated || LibraryService.getSettings().offlineMode || stopAtEndRef.current) return;
         if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return;
         if (refresh && candidates.length) {
           queueRef.current.replaceAutoUpcoming(candidates);
           bumpQueue();
           persistQueue();
-          preloader.schedule(queueRef.current.peekNext());
+          scheduleNext();
         } else if (queueRef.current.add(candidates)) {
           bumpQueue();
           persistQueue();
-          preloader.schedule(queueRef.current.peekNext());
+          scheduleNext();
         }
       } finally {
         if (session === autoSession.current) setIsPreparingAuto(false);
@@ -276,7 +284,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     })().catch(() => undefined).finally(() => { if (autoFill.current === work) autoFill.current = null; });
     autoFill.current = work;
     return work;
-  }, [bumpQueue, persistQueue, signals]);
+  }, [bumpQueue, persistQueue, signals, scheduleNext]);
 
   const refreshAuto = useCallback(() => {
     const session = autoSession.current;
@@ -307,6 +315,32 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       if (lastTasteSignature.current !== null && tasteSignature !== lastTasteSignature.current) refreshAuto();
       lastTasteSignature.current = tasteSignature;
       const enabled = LibraryService.getSettings().autoplayRelated;
+      const offline = LibraryService.getSettings().offlineMode;
+      if (lastOfflineEnabled.current !== offline) {
+        lastOfflineEnabled.current = offline;
+        if (offline) {
+          if (transitioning.current && queueRef.current.current && !offlineMediaService.isAvailable(queueRef.current.current)) {
+            loadAbort.current?.abort();
+            transition.current.reset();
+            transitioning.current = false;
+            loadingTrackId.current = null;
+            clearFeedbackTimers();
+            clearBufferingTimers();
+            setPendingTrack(null);
+            setTransitionState('paused');
+            setTransitionFeedback('hidden');
+            setIsLoading(false);
+          }
+          autoManager.current.cancel();
+          autoSession.current++;
+          autoFill.current = null;
+          queueRef.current.clearAutoUpcoming();
+          bumpQueue();
+          persistQueue();
+          preloader.cancel();
+          if (confirmedTrack.current && !offlineMediaService.isAvailable(confirmedTrack.current)) playbackEngine.pause();
+        } else void fillAuto();
+      }
       if (lastAutoEnabled.current === enabled) return;
       lastAutoEnabled.current = enabled;
       if (!enabled) {
@@ -315,10 +349,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         queueRef.current.clearAutoUpcoming();
         bumpQueue();
         persistQueue();
-        preloader.schedule(queueRef.current.peekNext());
+        scheduleNext();
       } else void fillAuto();
     });
-  }, [bumpQueue, fillAuto, persistQueue, refreshAuto]);
+  }, [bumpQueue, fillAuto, persistQueue, refreshAuto, scheduleNext, clearFeedbackTimers, clearBufferingTimers]);
 
   // ---- loading a track --------------------------------------------------
 
@@ -388,7 +422,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       lastAttempt.current = { track, position: options.startPosition ?? 0 };
 
       try {
-        const stream = await MusicService.resolveStream(track, controller.signal);
+        const stream = await offlineMediaService.localStream(track, LibraryService.getSettings().offlineMode)
+          ?? await MusicService.resolveStream(track, controller.signal);
         if (!transition.current.isCurrent(id)) return; // superseded by a newer load
         timing.mark('resolverComplete');
         transition.current.advance(id, 'preparing');
@@ -434,7 +469,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
 
         // Warm exactly one track ahead, so pressing skip is instant.
-        preloader.schedule(queueRef.current.peekNext());
+        scheduleNext();
         if (refreshAfterNext.current) {
           refreshAfterNext.current = false;
           void fillAuto(true);
@@ -482,7 +517,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setError(messageFor(err));
       }
     },
-    [bumpQueue, persistQueue, fillAuto, clearFeedbackTimers, clearBufferingTimers, startFeedbackTimers]
+    [bumpQueue, persistQueue, fillAuto, clearFeedbackTimers, clearBufferingTimers, startFeedbackTimers, scheduleNext]
   );
 
   // ---- engine wiring ----------------------------------------------------
@@ -519,6 +554,21 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     playbackEngine.on('onComplete', () => {
       if (transitioning.current) return;
       if (sleepTimerUntil.current && Date.now() >= sleepTimerUntil.current) return;
+      if (LibraryService.getSettings().offlineMode) {
+        if (queueRef.current.repeat === 'one') {
+          void loadCurrent({ autoPlay: true });
+          return;
+        }
+        const snapshot = queueRef.current.snapshot();
+        const nextLocal = queueRef.current.upcoming.find((track) => offlineMediaService.isAvailable(track))
+          ?? (queueRef.current.repeat === 'all' ? snapshot.order?.map((index) => snapshot.tracks[index]).find((track) => offlineMediaService.isAvailable(track)) : undefined);
+        if (!nextLocal) return;
+        queueRef.current.jumpTo(nextLocal.id);
+        bumpQueue();
+        persistQueue();
+        void loadCurrent({ autoPlay: true });
+        return;
+      }
       // `auto` so repeat-one replays rather than advances.
       const nextTrack = queueRef.current.next(true);
       bumpQueue();
@@ -570,11 +620,13 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     (async () => {
       try {
-        await Promise.all([MusicService.init(), LibraryService.load()]);
+        await Promise.all([MusicService.init(), LibraryService.load(), offlineMediaService.init()]);
         if (cancelled) return;
+        void downloadManager.recoverInterrupted();
 
         const settings = LibraryService.getSettings();
         lastAutoEnabled.current = settings.autoplayRelated;
+        lastOfflineEnabled.current = settings.offlineMode;
         endpointSource.setEndpoints(settings.resolverEndpoints);
 
         playbackEngine.setVolume(settings.volume);
@@ -670,6 +722,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const playTrack = useCallback(
     (track: Track, context?: { tracks?: Track[]; label?: string; candidates?: Track[]; query?: string }) => {
+      if (LibraryService.getSettings().offlineMode && !offlineMediaService.isAvailable(track)) {
+        setError('Streaming only. Turn off Offline Mode to play this song.');
+        return;
+      }
       if (transitioning.current && loadingTrackId.current === track.id) return;
       nextIntent.current++;
       refreshAfterNext.current = false;
@@ -677,14 +733,16 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       autoSession.current++;
       autoFill.current = null;
       autoManager.current.start(track, context?.candidates, context?.query);
-      const list = context?.tracks?.length ? context.tracks : [track];
+      const list = LibraryService.getSettings().offlineMode
+        ? (context?.tracks?.length ? context.tracks : [track]).filter((item) => offlineMediaService.isAvailable(item))
+        : context?.tracks?.length ? context.tracks : [track];
       const startIndex = Math.max(
         0,
         list.findIndex((t) => t.id === track.id)
       );
 
       queueRef.current.setTracks(list, startIndex, context?.label ?? '');
-      if (LibraryService.getSettings().autoplayRelated && !stopAtEndRef.current) {
+      if (LibraryService.getSettings().autoplayRelated && !LibraryService.getSettings().offlineMode && !stopAtEndRef.current) {
         queueRef.current.add(autoManager.current.immediate(
           new Set(queueRef.current.items.map((item) => item.id)),
           { ...signals(), excludedSongKeys: new Set(queueRef.current.items.map(logicalSongKey)) }
@@ -703,6 +761,10 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     if (transitioning.current) return;
     const track = queueRef.current.current ?? currentTrack;
     if (!track) return;
+    if (LibraryService.getSettings().offlineMode && !offlineMediaService.isAvailable(track)) {
+      setError('Streaming only. Turn off Offline Mode to play this song.');
+      return;
+    }
 
     // Restored-but-never-loaded track: the first press starts it.
     if (playbackEngine.trackId !== track.id) {
@@ -724,6 +786,17 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const next = useCallback(async () => {
     const intent = ++nextIntent.current;
     const intentAt = Date.now();
+    if (LibraryService.getSettings().offlineMode) {
+      const snapshot = queueRef.current.snapshot();
+      const nextLocal = queueRef.current.upcoming.find((track) => offlineMediaService.isAvailable(track))
+        ?? (queueRef.current.repeat !== 'off' ? snapshot.order?.map((index) => snapshot.tracks[index]).find((track) => offlineMediaService.isAvailable(track)) : undefined);
+      if (!nextLocal) return;
+      queueRef.current.jumpTo(nextLocal.id);
+      bumpQueue();
+      persistQueue();
+      void loadCurrent({ autoPlay: true, intentAt });
+      return;
+    }
     if (!transitioning.current && statusRef.current.isPlaying && statusRef.current.position < 10 && confirmedTrack.current) {
       sessionSkippedIds.current.add(confirmedTrack.current.id);
       autoManager.current.noteSkip(confirmedTrack.current);
@@ -748,6 +821,22 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const previous = useCallback(() => {
     nextIntent.current++;
+    if (LibraryService.getSettings().offlineMode) {
+      if (!transitioning.current && statusRef.current.position > 3) {
+        void playbackEngine.seekTo(0);
+        return;
+      }
+      const snapshot = queueRef.current.snapshot();
+      const ordered = (snapshot.order ?? snapshot.tracks.map((_, index) => index)).map((index) => snapshot.tracks[index]);
+      const prior = ordered.slice(0, snapshot.position ?? 0).reverse().find((track) => offlineMediaService.isAvailable(track))
+        ?? (queueRef.current.repeat === 'all' ? [...ordered].reverse().find((track) => offlineMediaService.isAvailable(track)) : undefined);
+      if (!prior) { void playbackEngine.seekTo(0); return; }
+      queueRef.current.jumpTo(prior.id);
+      bumpQueue();
+      persistQueue();
+      void loadCurrent({ autoPlay: true });
+      return;
+    }
     if (transitioning.current) {
       const previousTrack = queueRef.current.previous();
       if (previousTrack) {
@@ -824,9 +913,9 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       queueRef.current.clearAutoUpcoming();
       bumpQueue();
       persistQueue();
-      preloader.schedule(queueRef.current.peekNext());
+      scheduleNext();
     } else void fillAuto();
-  }, [bumpQueue, fillAuto, persistQueue]);
+  }, [bumpQueue, fillAuto, persistQueue, scheduleNext]);
 
   const retry = useCallback(() => {
     const attempt = lastAttempt.current;
@@ -853,7 +942,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const wasEmpty = queueRef.current.length === 0;
       const manual = (Array.isArray(tracks) ? tracks : [tracks]).map((track) =>
         track.isAutoSuggested ? { ...track, isAutoSuggested: false } : track
-      );
+      ).filter((track) => !LibraryService.getSettings().offlineMode || offlineMediaService.isAvailable(track));
+      if (!manual.length) return false;
       const added = queueRef.current.add(manual);
       if (!added) return false;
       autoManager.current.noteManual(manual);
@@ -861,11 +951,11 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       persistQueue();
 
       if (wasEmpty) void loadCurrent({ autoPlay: true });
-      else preloader.schedule(queueRef.current.peekNext());
+      else scheduleNext();
       if (!wasEmpty) refreshAuto();
       return true;
     },
-    [bumpQueue, loadCurrent, persistQueue, refreshAuto]
+    [bumpQueue, loadCurrent, persistQueue, refreshAuto, scheduleNext]
   );
 
   const playNextInQueue = useCallback(
@@ -873,17 +963,18 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       const wasEmpty = queueRef.current.length === 0;
       const manual = (Array.isArray(tracks) ? tracks : [tracks]).map((track) =>
         track.isAutoSuggested ? { ...track, isAutoSuggested: false } : track
-      );
+      ).filter((track) => !LibraryService.getSettings().offlineMode || offlineMediaService.isAvailable(track));
+      if (!manual.length) return;
       queueRef.current.playNext(manual);
       autoManager.current.noteManual(manual);
       bumpQueue();
       persistQueue();
 
       if (wasEmpty) void loadCurrent({ autoPlay: true });
-      else preloader.schedule(queueRef.current.peekNext());
+      else scheduleNext();
       if (!wasEmpty) refreshAuto();
     },
-    [bumpQueue, loadCurrent, persistQueue, refreshAuto]
+    [bumpQueue, loadCurrent, persistQueue, refreshAuto, scheduleNext]
   );
 
   const removeFromQueue = useCallback(
@@ -903,30 +994,39 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     [bumpQueue, loadCurrent, persistQueue, refreshAuto]
   );
 
+  const removeManualUpcoming = useCallback((trackId: string): boolean => {
+    if (!queueRef.current.removeManualUpcoming(trackId)) return false;
+    bumpQueue();
+    persistQueue();
+    scheduleNext();
+    return true;
+  }, [bumpQueue, persistQueue, scheduleNext]);
+
   const reorderQueue = useCallback(
-    (from: number, to: number) => {
-      // UI indices are relative to `upcoming` (starts after the current track).
-      // Queue.reorder expects indices into the full `order` array, so we offset
-      // by (total - upcoming.length) which equals (position + 1).
-      const upcomingLen = queueRef.current.upcoming.length;
-      const totalLen = queueRef.current.length;
-      const offset = totalLen - upcomingLen;
-      queueRef.current.reorder(from + offset, to + offset);
+    (trackId: string, toManualIndex: number): boolean => {
+      if (!queueRef.current.moveManualUpcoming(trackId, toManualIndex)) return false;
       bumpQueue();
       persistQueue();
+      scheduleNext();
+      return true;
     },
-    [bumpQueue, persistQueue]
+    [bumpQueue, persistQueue, scheduleNext]
   );
 
   const clearQueue = useCallback(() => {
     queueRef.current.clearManualUpcoming();
     bumpQueue();
     persistQueue();
-    preloader.schedule(queueRef.current.peekNext());
-  }, [bumpQueue, persistQueue]);
+    scheduleNext();
+  }, [bumpQueue, persistQueue, scheduleNext]);
 
   const jumpTo = useCallback(
     (trackId: string) => {
+      const target = queueRef.current.items.find((track) => track.id === trackId);
+      if (target && LibraryService.getSettings().offlineMode && !offlineMediaService.isAvailable(target)) {
+        setError('Streaming only. Turn off Offline Mode to play this song.');
+        return;
+      }
       const track = queueRef.current.jumpTo(trackId);
       if (!track) return;
 
@@ -942,8 +1042,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     queueRef.current.toggleShuffle();
     bumpQueue();
     persistQueue();
-    preloader.schedule(queueRef.current.peekNext());
-  }, [bumpQueue, persistQueue]);
+    scheduleNext();
+  }, [bumpQueue, persistQueue, scheduleNext]);
 
   const cycleRepeat = useCallback(() => {
     queueRef.current.cycleRepeat();
@@ -1020,6 +1120,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       addToQueue,
       playNext: playNextInQueue,
       removeFromQueue,
+      removeManualUpcoming,
       reorderQueue,
       clearQueue,
       jumpTo,
@@ -1059,6 +1160,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       addToQueue,
       playNextInQueue,
       removeFromQueue,
+      removeManualUpcoming,
       reorderQueue,
       clearQueue,
       jumpTo,

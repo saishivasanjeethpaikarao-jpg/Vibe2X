@@ -16,6 +16,46 @@ function mockTrack(id: string, opts?: Partial<Track>): Track {
 }
 
 describe('Queue', () => {
+  it('reorders manual Up Next for actual playback without moving the current track', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    queue.add([mockTrack('B'), mockTrack('C'), mockTrack('D')]);
+    expect(queue.moveManualUpcoming('D', 0)).toBe(true);
+    expect(queue.current?.id).toBe('A');
+    expect(queue.manualUpcoming.map((track) => track.id)).toEqual(['D', 'B', 'C']);
+    expect(queue.next()?.id).toBe('D');
+    expect(queue.next()?.id).toBe('B');
+    expect(queue.next()?.id).toBe('C');
+  });
+
+  it('removes only manual future entries and updates the next track', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    queue.add([mockTrack('B'), mockTrack('C'), mockTrack('D')]);
+    expect(queue.removeManualUpcoming('C')).toBe(true);
+    expect(queue.upcoming.map((track) => track.id)).toEqual(['B', 'D']);
+    expect(queue.removeManualUpcoming('B')).toBe(true);
+    expect(queue.peekNext()?.id).toBe('D');
+    expect(queue.removeManualUpcoming('A')).toBe(false);
+    expect(queue.current?.id).toBe('A');
+  });
+
+  it('keeps context and Smart Continue after reordered manual entries, including reload', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A'), mockTrack('P')], 0, 'Playlist');
+    queue.add([mockTrack('S', { isAutoSuggested: true })]);
+    queue.add([mockTrack('B'), mockTrack('C'), mockTrack('D')]);
+    expect(queue.moveManualUpcoming('D', 0)).toBe(true);
+    expect(queue.moveManualUpcoming('S', 0)).toBe(false);
+    expect(queue.removeManualUpcoming('S')).toBe(false);
+    const restored = new Queue();
+    restored.restore(queue.snapshot());
+    expect(restored.upcomingEntries.map((entry) => [entry.track.id, entry.origin])).toEqual([
+      ['D', 'manual'], ['B', 'manual'], ['C', 'manual'], ['P', 'context'], ['S', 'smartContinue'],
+    ]);
+    expect(restored.next()?.id).toBe('D');
+  });
+
   it('single search result does not create hidden result queue', () => {
     const queue = new Queue();
     const trackA = mockTrack('A');

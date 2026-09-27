@@ -22,6 +22,7 @@
     "expo-linear-gradient": "~57.0.2",
     "expo-linking": "~57.0.11",
     "expo-media-library": "~57.0.5",
+    "expo-network": "~57.0.2",
     "expo-secure-store": "~57.0.4",
     "expo-sharing": "~57.0.22",
     "expo-sqlite": "~57.0.3",

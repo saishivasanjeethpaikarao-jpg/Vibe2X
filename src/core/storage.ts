@@ -99,4 +99,5 @@ export const STORAGE_KEYS = {
   searchHistory: 'search-history',
   cache: 'cache',
   history: 'history',
+  offlineDownloads: 'offline-downloads',
 } as const;

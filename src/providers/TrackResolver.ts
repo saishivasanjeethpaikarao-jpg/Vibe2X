@@ -8,6 +8,7 @@ import {
   SearchResults,
   Track,
 } from '../core/types';
+import { AuthorizedOfflineAsset, OfflineCapability } from '../offline/types';
 
 export type SearchOptions = {
   filter?: SearchFilter;
@@ -34,6 +35,11 @@ export type PlaylistPage = {
 export interface TrackResolver {
   readonly id: ProviderId;
   readonly name: string;
+
+  /** Explicit persistent-offline entitlement; absent means streaming-only. */
+  offlineCapability?(track: Track): OfflineCapability;
+  /** Never return an expiring playback stream URL here. */
+  getAuthorizedOfflineAsset?(track: Track, signal: AbortSignal): Promise<AuthorizedOfflineAsset>;
 
   /** Discovery. Returns normalized results for the given filter. */
   search(query: string, options?: SearchOptions): Promise<SearchResults>;

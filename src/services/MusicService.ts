@@ -10,6 +10,8 @@ import { PlaylistPage, providers } from '../providers/TrackResolver';
 import { youtubeResolver } from '../providers/youtube/YouTubeResolver';
 import { streamResolver } from '../providers/stream/StreamResolver';
 import { localResolver, fetchLocalTracks } from '../providers/local/LocalResolver';
+import { LibraryService } from './LibraryService';
+import { offlineMediaService } from '../offline/runtime';
 
 // Register the providers the app ships with. Adding another is one line.
 providers.register(youtubeResolver, true);
@@ -22,6 +24,7 @@ providers.register(localResolver, false);
  * imports a provider, an InnerTube helper, or a stream resolver.
  */
 class MusicServiceImpl {
+  private localTrackCache: Track[] | null = null;
   /** Warm the on-disk metadata cache. Called once at startup. */
   async init(): Promise<void> {
     await metadataCache.hydrate();
@@ -34,6 +37,16 @@ class MusicServiceImpl {
     const q = query.trim();
     if (!q) return emptySearchResults();
 
+    if (LibraryService.getSettings().offlineMode) {
+      const local = this.localTrackCache ?? await fetchLocalTracks();
+      this.localTrackCache = local;
+      const downloaded = offlineMediaService.library.completed().flatMap((record) => record.track ? [record.track] : []);
+      const available = [...new Map([...local, ...downloaded].map((track) => [track.id, track])).values()];
+      return { ...emptySearchResults(q), tracks: available.filter((track) =>
+        `${track.title} ${track.artist.name}`.toLocaleLowerCase().includes(q.toLocaleLowerCase())
+      ).slice(0, options.limit ?? 50) };
+    }
+
     try {
       return await providers.default.search(q, options);
     } catch (e) {
@@ -42,12 +55,16 @@ class MusicServiceImpl {
   }
 
   async getSuggestions(input: string, signal?: AbortSignal): Promise<string[]> {
+    if (LibraryService.getSettings().offlineMode) return [];
     const provider = providers.default;
     if (!provider.getSuggestions) return [];
     return provider.getSuggestions(input, signal);
   }
 
-  async getLocalTracks(): Promise<Track[]> { return fetchLocalTracks(); }
+  async getLocalTracks(): Promise<Track[]> {
+    this.localTrackCache = await fetchLocalTracks();
+    return this.localTrackCache;
+  }
 
   async getMetadata(track: Track, signal?: AbortSignal): Promise<Track> {
     return providers.forTrack(track).getMetadata(track.sourceId, signal);
@@ -100,6 +117,7 @@ class MusicServiceImpl {
   }
 
   async getRelated(track: Track, signal?: AbortSignal): Promise<Track[]> {
+    if (LibraryService.getSettings().offlineMode) return [];
     const provider = providers.forTrack(track);
     if (!provider.getRelated) return [];
     return provider.getRelated(track, signal);
@@ -134,6 +152,8 @@ class MusicServiceImpl {
 
   /** Whether any configured source could play this track at all. */
   canPlay(track: Track): boolean {
+    if (LibraryService.getSettings().offlineMode) return offlineMediaService.isAvailable(track);
+    if (offlineMediaService.isAvailable(track)) return true;
     if (track.provider === 'local') return Boolean(track.audioUrl || track.sourceId);
     return streamResolver.canResolve(track);
   }
@@ -144,6 +164,7 @@ class MusicServiceImpl {
    */
   prefetchStream(track: Track | null): void {
     if (!track) return;
+    if (LibraryService.getSettings().offlineMode) return;
     if (!streamResolver.canResolve(track)) return;
     if (streamResolver.peek(track)) return;
 

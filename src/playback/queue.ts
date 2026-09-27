@@ -284,6 +284,32 @@ export class Queue {
     this.position = this.order.indexOf(currentOrderValue);
   }
 
+  /** Reorder only explicit Up Next. The current/context/automatic tracks never move. */
+  moveManualUpcoming(trackId: string, toManualIndex: number): boolean {
+    const manual = this.manualUpcoming;
+    const fromManualIndex = manual.findIndex((track) => track.id === trackId);
+    if (fromManualIndex < 0 || toManualIndex < 0 || toManualIndex >= manual.length) return false;
+    if (fromManualIndex === toManualIndex) return false;
+
+    const from = this.order.findIndex((index, position) =>
+      position > this.position && this.tracks[index]?.id === trackId
+    );
+    const targetId = manual[toManualIndex].id;
+    const to = this.order.findIndex((index, position) =>
+      position > this.position && this.tracks[index]?.id === targetId
+    );
+    if (from < 0 || to < 0) return false;
+    this.reorder(from, to);
+    return true;
+  }
+
+  /** Remove a manual future entry, never the active song or generated tail. */
+  removeManualUpcoming(trackId: string): boolean {
+    if (!this.manualUpcoming.some((track) => track.id === trackId)) return false;
+    this.remove(trackId, { keepCurrent: true });
+    return true;
+  }
+
   clear(): void {
     this.tracks = [];
     this.order = [];
