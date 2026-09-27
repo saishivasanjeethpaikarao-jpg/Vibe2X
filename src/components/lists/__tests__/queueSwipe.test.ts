@@ -46,4 +46,17 @@ describe('TrackRow queue swipe', () => {
     expect(addFromQueueSwipe('left', track('C'), add, show)).toBe(false);
     expect(show).toHaveBeenCalledTimes(1);
   });
+
+  it('playlist row menu and swipe promote tracks through the same queue mutation', () => {
+    const queue = new Queue();
+    queue.setTracks([track('A'), track('B'), track('X')], 0, 'Playlist P');
+    const add = (item: Track) => queue.add(item) > 0;
+    const show = vi.fn();
+    expect(addWithQueueFeedback(track('X'), add, show)).toBe(true);
+    expect(queue.upcomingEntries.map((entry) => [entry.track.id, entry.origin])).toEqual([
+      ['X', 'manual'], ['B', 'context'],
+    ]);
+    expect(queue.next()?.id).toBe('X');
+    expect(show).toHaveBeenCalledWith('Added to queue');
+  });
 });

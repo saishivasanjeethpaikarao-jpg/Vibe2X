@@ -1,16 +1,12 @@
 import { QueueEntry } from '../playback/queue';
 
-export type QueueDragItem =
-  | { type: 'header'; id: string; title: string }
-  | { type: 'track'; id: string; track: QueueEntry['track']; origin: QueueEntry['origin']; originalIndex: number };
+export type QueueDragItem = QueueEntry & { id: string; sectionTitle?: string };
 
-/** Translate a visual drag (which includes headers) into a manual-queue mutation. */
-export function manualDropTarget(before: QueueDragItem[], after: QueueDragItem[], from: number): { trackId: string; toIndex: number } | null {
+/** Only tracks are draggable; headers are presentation and never list keys. */
+export function upcomingDropTarget(before: readonly QueueDragItem[], after: readonly QueueDragItem[], from: number): { trackId: string; toIndex: number } | null {
   const moved = before[from];
-  if (!moved || moved.type !== 'track' || moved.origin !== 'manual') return null;
-  const oldManual = before.filter((item) => item.type === 'track' && item.origin === 'manual');
-  const newTracks = after.filter((item) => item.type === 'track');
-  const toIndex = newTracks.findIndex((item) => item.id === moved.id);
-  if (toIndex < 0 || toIndex >= oldManual.length || oldManual.findIndex((item) => item.id === moved.id) === toIndex) return null;
+  if (!moved || before.length !== after.length) return null;
+  const toIndex = after.findIndex((item) => item.id === moved.id);
+  if (toIndex < 0 || toIndex === from || new Set(after.map((item) => item.id)).size !== after.length) return null;
   return { trackId: moved.track.id, toIndex };
 }

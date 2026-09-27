@@ -68,4 +68,21 @@ describe('hybrid Smart Continue', () => {
     expect(result.map((item) => item.id)).toEqual(expect.arrayContaining([one.id, two.id]));
     expect(result.map((item) => item.id)).not.toContain('invented');
   });
+  it('applies a valid AI order and reports when deterministic fallback is used', async () => {
+    const one = track('order-one', 'First related track', 'Indie Artist');
+    const two = track('order-two', 'Second related track', 'Other Artist');
+    const manager = new AutoContinueManager({ related: async () => [one, two], search: async () => [], canPlay: () => true }, {
+      rerank: async () => [two.id, one.id],
+    });
+    manager.start(seed);
+    expect((await manager.refill(new Set([seed.id]), { ...empty, useAIReranking: true })).map((item) => item.id)).toEqual([two.id, one.id]);
+    expect(manager.diagnostics).toMatchObject({ aiEnabled: true, aiRequestSent: true, responseValid: true, aiOrderingApplied: true, fallbackUsed: false });
+
+    const fallback = new AutoContinueManager({ related: async () => [one, two], search: async () => [], canPlay: () => true }, {
+      rerank: async () => { throw new Error('recommendation_http_429'); },
+    });
+    fallback.start(seed);
+    expect((await fallback.refill(new Set([seed.id]), { ...empty, useAIReranking: true })).length).toBe(2);
+    expect(fallback.diagnostics).toMatchObject({ aiRequestSent: true, aiOrderingApplied: false, fallbackUsed: true, fallbackReason: 'rate_limited' });
+  });
 });

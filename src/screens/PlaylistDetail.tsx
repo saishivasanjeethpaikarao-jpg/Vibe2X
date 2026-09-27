@@ -125,8 +125,8 @@ export default function PlaylistDetailScreen() {
   }, [tracks, playlist, playTrack, shuffle, toggleShuffle]);
 
   const queueAll = useCallback(() => {
-    if (tracks.length) addToQueue(tracks);
-  }, [tracks, addToQueue]);
+    if (tracks.length && addToQueue(tracks)) show('Added to queue');
+  }, [tracks, addToQueue, show]);
 
   /** One stable callback for every row in this playlist. */
   const onTrackPress = useCallback(
@@ -146,7 +146,7 @@ export default function PlaylistDetailScreen() {
         isPlaying={currentTrack?.id === item.id && isPlaying}
       />
     ),
-    [onTrackPress, currentTrack?.id, isPlaying]
+    [onTrackPress, addToQueue, currentTrack?.id, isPlaying]
   );
 
   if (!playlist) {

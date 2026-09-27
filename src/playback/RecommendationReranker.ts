@@ -30,7 +30,9 @@ export function validateRankedIds(value: unknown, allowed: ReadonlySet<string>):
 }
 
 export class RemoteAIReranker implements RecommendationReranker {
-  constructor(private readonly endpoint: string, private readonly timeoutMs = 2500) {}
+  // The Worker allows a 4s hosted-model call. A shorter client deadline made
+  // valid slow replies look like perpetual deterministic fallback.
+  constructor(private readonly endpoint: string, private readonly timeoutMs = 5500) {}
 
   async rerank(context: RerankContext, candidates: RerankCandidate[], signal: AbortSignal): Promise<string[]> {
     if (!this.endpoint.startsWith('https://')) throw new Error('Recommendation endpoint is not HTTPS');
@@ -38,7 +40,7 @@ export class RemoteAIReranker implements RecommendationReranker {
     const abort = () => controller.abort();
     signal.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(abort, this.timeoutMs);
-    const compact = (track: Track) => ({ id: track.id, title: track.title, artist: track.artist.name, album: track.album ?? '', duration: track.duration });
+    const compact = (track: Track) => ({ id: track.id, title: track.title, artist: track.artist.name, album: track.album ?? '', duration: track.duration, language: track.language ?? '' });
     try {
       const response = await fetch(this.endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
@@ -50,10 +52,10 @@ export class RemoteAIReranker implements RecommendationReranker {
           candidates: candidates.slice(0, 40).map(({ track, score }) => ({ candidateId: track.id, ...compact(track), deterministicScore: score })),
         }),
       });
-      if (!response.ok) throw new Error('Recommendation service unavailable');
+      if (!response.ok) throw new Error(`recommendation_http_${response.status}`);
       const body: unknown = await response.json();
       const ranked = validateRankedIds(body, new Set(candidates.map(({ track }) => track.id)));
-      if (!ranked) throw new Error('Invalid recommendation response');
+      if (!ranked) throw new Error('invalid_response');
       return ranked;
     } finally {
       clearTimeout(timer);

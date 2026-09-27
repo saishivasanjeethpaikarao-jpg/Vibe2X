@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Track } from '../types';
-import { logicalSongKey } from '../logicalSong';
+import { logicalSongKey, sameLogicalRecording } from '../logicalSong';
 
 const track = (title: string, artist = 'Banjaare'): Track => ({
   id: `youtube:${title}:${artist}`, sourceId: title, provider: 'youtube',
@@ -21,5 +21,21 @@ describe('logical song identity', () => {
       expect(logicalSongKey(track(title))).not.toBe(original);
     }
     expect(logicalSongKey(track('Bairan', 'Another Artist'))).not.toBe(original);
+  });
+
+  it('collapses common Romanized long-vowel spellings without merging real versions', () => {
+    expect(logicalSongKey(track('Ori Vaari', 'Santhosh Narayanan'))).toBe(
+      logicalSongKey(track('Ori Vari Lyrics', 'Santhosh Narayanan'))
+    );
+    expect(logicalSongKey(track('Ori Vaari Live', 'Santhosh Narayanan'))).not.toBe(
+      logicalSongKey(track('Ori Vari', 'Santhosh Narayanan'))
+    );
+  });
+  it('requires corroborating album and duration to merge different uploaders', () => {
+    const original = { ...track('Ori Vaari', 'Original Channel'), album: 'Dasara', duration: 228 };
+    const repost = { ...track('Ori Vari Official Audio', 'Another Channel'), album: 'Dasara', duration: 231 };
+    const cover = { ...track('Ori Vari', 'Cover Singer'), album: 'Independent', duration: 231 };
+    expect(sameLogicalRecording(original, repost)).toBe(true);
+    expect(sameLogicalRecording(original, cover)).toBe(false);
   });
 });

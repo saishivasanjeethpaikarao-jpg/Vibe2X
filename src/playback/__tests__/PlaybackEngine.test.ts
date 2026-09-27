@@ -11,7 +11,7 @@ const native = vi.hoisted(() => {
       listeners.add(listener);
       return { remove: () => listeners.delete(listener) };
     }),
-    setActiveForLockScreen: vi.fn(), clearLockScreenControls: vi.fn(), remove: vi.fn(),
+    setActiveForLockScreen: vi.fn(), updateLockScreenMetadata: vi.fn(), clearLockScreenControls: vi.fn(), remove: vi.fn(),
   };
   return { listeners, player };
 });
@@ -87,9 +87,8 @@ describe('PlaybackEngine transition confirmation', () => {
     native.listeners.forEach((listener) => listener({ isLoaded: true, playing: true, currentTime: 0, duration: 180 }));
     await second;
     expect(engine.trackId).toBe('B');
-    expect(native.player.setActiveForLockScreen).toHaveBeenLastCalledWith(
-      true, expect.objectContaining({ title: 'B' }), expect.any(Object)
-    );
+    expect(native.player.setActiveForLockScreen).toHaveBeenCalledTimes(1);
+    expect(native.player.updateLockScreenMetadata).toHaveBeenCalledWith(expect.objectContaining({ title: 'B' }));
     await engine.release();
   });
 

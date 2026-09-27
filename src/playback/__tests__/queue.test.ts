@@ -168,6 +168,59 @@ describe('Queue', () => {
     expect(queue.upcoming.map((item) => item.id)).toEqual(['B', 'C', 'Auto']);
   });
 
+  it('queues a track chosen from a playlist ahead of its playback context', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A'), mockTrack('B'), mockTrack('X')], 0, 'Playlist P');
+    expect(queue.add(mockTrack('X'))).toBe(1);
+    expect(queue.upcomingEntries.map((entry) => [entry.track.id, entry.origin])).toEqual([
+      ['X', 'manual'], ['B', 'context'],
+    ]);
+    expect(queue.next()?.id).toBe('X');
+  });
+
+  it('reorders playlist context for the session, without changing the saved playlist', () => {
+    const source = [mockTrack('A'), mockTrack('B'), mockTrack('C'), mockTrack('D')];
+    const queue = new Queue();
+    queue.setTracks(source, 0, 'Playlist P');
+    expect(queue.moveUpcoming('D', 0)).toBe(true);
+    expect(queue.upcomingEntries.map((entry) => [entry.track.id, entry.origin])).toEqual([
+      ['D', 'context'], ['B', 'context'], ['C', 'context'],
+    ]);
+    expect(queue.next()?.id).toBe('D');
+    expect(source.map((track) => track.id)).toEqual(['A', 'B', 'C', 'D']);
+  });
+
+  it('promotes a playlist-context entry when dragged ahead of existing Up Next', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A'), mockTrack('B'), mockTrack('D')], 0, 'Playlist P');
+    queue.add(mockTrack('X'));
+    expect(queue.moveUpcoming('D', 0)).toBe(true);
+    expect(queue.upcomingEntries.map((entry) => [entry.track.id, entry.origin])).toEqual([
+      ['D', 'manual'], ['X', 'manual'], ['B', 'context'],
+    ]);
+  });
+
+  it('pins a dragged Smart Continue track and retains the rest behind it', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A')]);
+    queue.add(['B', 'C', 'D'].map((id) => mockTrack(id, { isAutoSuggested: true })));
+    expect(queue.moveUpcoming('D', 0)).toBe(true);
+    expect(queue.upcomingEntries.map((entry) => [entry.track.id, entry.origin])).toEqual([
+      ['D', 'manual'], ['B', 'smartContinue'], ['C', 'smartContinue'],
+    ]);
+    expect(queue.next()?.id).toBe('D');
+  });
+
+  it('removes context and automatic future entries but never the current track', () => {
+    const queue = new Queue();
+    queue.setTracks([mockTrack('A'), mockTrack('B'), mockTrack('C')], 0, 'Playlist P');
+    queue.add(mockTrack('D', { isAutoSuggested: true }));
+    expect(queue.removeUpcoming('A')).toBeNull();
+    expect(queue.removeUpcoming('C')).toBe('context');
+    expect(queue.removeUpcoming('D')).toBe('smartContinue');
+    expect(queue.upcoming.map((track) => track.id)).toEqual(['B']);
+  });
+
   it('promotes an automatic candidate when the user explicitly queues it', () => {
     const queue = new Queue();
     queue.setTracks([mockTrack('A')]);

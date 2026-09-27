@@ -81,6 +81,8 @@ type PlayerContextType = {
   removeFromQueue: (trackId: string) => void;
   removeManualUpcoming: (trackId: string) => boolean;
   reorderQueue: (trackId: string, toManualIndex: number) => boolean;
+  removeUpcoming: (trackId: string) => boolean;
+  moveUpcoming: (trackId: string, toUpcomingIndex: number) => boolean;
   clearQueue: () => void;
   jumpTo: (trackId: string) => void;
 
@@ -263,7 +265,7 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const retained = queueRef.current.items.filter((track) => !replaceableIds.has(track.id));
         const candidates = await autoManager.current.refill(
           new Set(retained.map((track) => track.id)),
-          { ...signals(recentIds, suppressedIds), excludedSongKeys: new Set(retained.map(logicalSongKey)) },
+          { ...signals(recentIds, suppressedIds), excludedSongKeys: new Set(retained.map(logicalSongKey)), excludedTracks: retained },
           refresh ? 4 : 4 - queueRef.current.autoUpcoming.length
         );
         if (session !== autoSession.current || !LibraryService.getSettings().autoplayRelated || LibraryService.getSettings().offlineMode || stopAtEndRef.current) return;
@@ -1013,6 +1015,29 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     [bumpQueue, persistQueue, scheduleNext]
   );
 
+  const removeUpcoming = useCallback((trackId: string): boolean => {
+    const autoTrack = queueRef.current.autoUpcoming.find((track) => track.id === trackId);
+    const origin = queueRef.current.removeUpcoming(trackId);
+    if (!origin) return false;
+    if (autoTrack) autoManager.current.noteSkip(autoTrack);
+    bumpQueue();
+    persistQueue();
+    scheduleNext();
+    if (origin === 'smartContinue') refreshAuto();
+    return true;
+  }, [bumpQueue, persistQueue, refreshAuto, scheduleNext]);
+
+  const moveUpcoming = useCallback((trackId: string, toUpcomingIndex: number): boolean => {
+    const moved = queueRef.current.moveUpcoming(trackId, toUpcomingIndex);
+    if (!moved) return false;
+    const track = queueRef.current.manualUpcoming.find((item) => item.id === trackId);
+    if (track) autoManager.current.noteManual([track]);
+    bumpQueue();
+    persistQueue();
+    scheduleNext();
+    return true;
+  }, [bumpQueue, persistQueue, scheduleNext]);
+
   const clearQueue = useCallback(() => {
     queueRef.current.clearManualUpcoming();
     bumpQueue();
@@ -1122,6 +1147,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       removeFromQueue,
       removeManualUpcoming,
       reorderQueue,
+      removeUpcoming,
+      moveUpcoming,
       clearQueue,
       jumpTo,
 
@@ -1162,6 +1189,8 @@ export const PlayerProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       removeFromQueue,
       removeManualUpcoming,
       reorderQueue,
+      removeUpcoming,
+      moveUpcoming,
       clearQueue,
       jumpTo,
       toggleShuffle,

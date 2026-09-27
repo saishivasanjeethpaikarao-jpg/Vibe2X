@@ -128,6 +128,9 @@ export class PlaybackEngine {
         addListener: (name: 'transportControl', callback: (event: { action?: string }) => void) => { remove: () => void };
       };
       this.transportSubscription = transportPlayer.addListener('transportControl', (event) => {
+        if (process.env.EXPO_PUBLIC_PLAYBACK_QA_TIMING === '1') {
+          console.info('[Vibe2XTransport] JS command received', event?.action === 'next' ? 'next' : event?.action === 'previous' ? 'previous' : 'unknown');
+        }
         if (event?.action === 'next') this.listeners.onNext?.();
         else if (event?.action === 'previous') this.listeners.onPrevious?.();
       });
@@ -414,9 +417,9 @@ export class PlaybackEngine {
    * updateLockScreenMetadata only applies while the playback service is
    * BOUND; during BINDING it logs a warning and discards the metadata. That
    * window is what previously left the notification showing an older track.
-   * Re-sending once playback has genuinely started closes it, and is driven
-   * by a real event rather than a guessed delay. It is a metadata swap, not
-   * a session rebuild, so the progress bar keeps running.
+   * Re-sending once playback has genuinely started closes it. The native
+   * player caches metadata during binding; once attached, update the existing
+   * MediaSession rather than rebuilding it for every song.
    */
   private syncLockScreenOnce(): void {
     if (Platform.OS === 'web') return;
@@ -427,14 +430,14 @@ export class PlaybackEngine {
 
     this.lockScreenSynced = true;
     try {
-      // Re-asserting using setActiveForLockScreen instead of updateLockScreenMetadata
-      // ensures expo-audio caches the metadata internally. If we use updateLockScreenMetadata,
-      // expo-audio's native module drops it from cache, and the next time the user pauses
-      // or seeks from the lockscreen, the session goes blank.
-      this.player?.setActiveForLockScreen(true, this.metadataFor(track), {
-        showSeekForward: false,
-        showSeekBackward: false,
-      });
+      if (this.lockScreenActive) {
+        this.player?.updateLockScreenMetadata(this.metadataFor(track));
+      } else {
+        this.player?.setActiveForLockScreen(true, this.metadataFor(track), {
+          showSeekForward: false,
+          showSeekBackward: false,
+        });
+      }
       this.lockScreenActive = true;
     } catch {
       /* best effort */

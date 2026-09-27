@@ -28,6 +28,8 @@ jobs:
       EXPO_PUBLIC_PLAYBACK_QA_TIMING: '1'
       # Numeric import stages/counts only; no playlist links, titles, or credentials.
       EXPO_PUBLIC_IMPORT_QA_TIMING: '1'
+      # Music-only local diagnostics; no provider keys or playback URLs.
+      EXPO_PUBLIC_QA_RECOMMENDATIONS: 'true'
 
     steps:
       - name: Check out source

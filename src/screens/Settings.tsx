@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useSyncExternalStore } from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import {
@@ -18,6 +18,7 @@ import { COLORS, SIZES, FONTS } from '../constants/theme';
 import { Gender } from '../services/LibraryService';
 import { useLibrary } from '../hooks/useLibrary';
 import { LibraryService } from '../services/LibraryService';
+import { getRecommendationQA, recommendationQAEnabled, subscribeRecommendationQA } from '../playback/recommendationQA';
 
 const GENDERS: { value: Gender; label: string }[] = [
   { value: 'male', label: 'Male' },
@@ -32,6 +33,7 @@ export default function SettingsScreen() {
   const { profile, saveProfile, history, playlists, liked, settings, updateSettings } = useLibrary();
 
   const [name, setName] = useState(profile.name);
+  const recommendationQA = useSyncExternalStore(subscribeRecommendationQA, getRecommendationQA);
 
   const handleExport = async () => {
     try {
@@ -155,6 +157,18 @@ export default function SettingsScreen() {
             <Switch value={settings.aiRecommendationsEnabled} onValueChange={(value) => updateSettings({ aiRecommendationsEnabled: value })}
               accessibilityLabel="AI-assisted suggestions" disabled={!process.env.EXPO_PUBLIC_RECOMMENDATION_ENDPOINT} />
           </View>
+          {recommendationQAEnabled && <View style={styles.infoRow}>
+            <View style={styles.smartContinueText}>
+              <Text style={styles.rowValue}>Recommendation QA</Text>
+              <Text style={styles.infoDescription}>
+                {!recommendationQA ? 'Play a song to see ranking diagnostics.'
+                  : `AI ${recommendationQA.aiOrderingApplied ? 'applied' : 'fallback'}${recommendationQA.fallbackReason ? ` (${recommendationQA.fallbackReason})` : ''} · ${recommendationQA.filteredCandidateCount}/${recommendationQA.candidateCount} candidates · ${recommendationQA.aiLatencyMs ?? '—'} ms`}
+              </Text>
+              {recommendationQA?.selected.map((entry) => <Text key={entry.trackId} style={styles.infoDescription}>
+                {entry.title} · {entry.sourceCandidateType.join(', ')} · {entry.language} · {entry.reasons.join('; ')}
+              </Text>)}
+            </View>
+          </View>}
         </View>
 
         {/* ---- Data ---- */}

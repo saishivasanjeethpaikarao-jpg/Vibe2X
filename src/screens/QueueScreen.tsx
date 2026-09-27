@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -10,17 +10,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronDown, Music, Search, ListPlus, Sparkles, GripVertical, MoreVertical } from 'lucide-react-native';
 import { COLORS, SIZES, FONTS, THEME } from '../constants/theme';
 import { Track } from '../core/types';
-import { QueueEntry } from '../playback/queue';
 import { usePlayer } from '../hooks/usePlayer';
 import { useLibrary } from '../hooks/useLibrary';
 import { useNavigation } from '@react-navigation/native';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
-// @ts-ignore
-import Swipeable from 'react-native-gesture-handler/Swipeable';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { LiquidSheet } from '../components/liquid/LiquidSheet';
 import { useSnackbar } from '../components/common/SnackbarContext';
 import { offlineMediaService } from '../offline/runtime';
-import { manualDropTarget, QueueDragItem } from './queueDrag';
+import { upcomingDropTarget, QueueDragItem } from './queueDrag';
 
 type QueueItem = QueueDragItem;
 
@@ -29,50 +27,47 @@ export default function QueueScreen() {
   const navigation = useNavigation();
   const { createPlaylist, settings } = useLibrary();
   const { show } = useSnackbar();
-  const [selectedManual, setSelectedManual] = useState<Track | null>(null);
+  const [selectedUpcoming, setSelectedUpcoming] = useState<Track | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const frozenDragData = useRef<QueueItem[] | null>(null);
   const {
     currentTrack,
     upcomingEntries,
     queueContext,
     jumpTo,
-    removeManualUpcoming,
+    removeUpcoming,
     playNext,
     clearQueue,
-    reorderQueue,
+    moveUpcoming,
     isPreparingAuto,
     pendingTrack,
     transitionFeedback,
   } = usePlayer();
 
   const queueData = useMemo(() => {
-    const data: QueueItem[] = [];
-    let previousOrigin: QueueEntry['origin'] | null = null;
-    upcomingEntries.forEach((entry, originalIndex) => {
-      if (entry.origin !== previousOrigin) {
-        const title = entry.origin === 'manual' ? 'Up next'
+    return upcomingEntries.map((entry, index): QueueItem => ({
+      ...entry,
+      id: `track-${entry.track.id}`,
+      sectionTitle: index > 0 && upcomingEntries[index - 1].origin === entry.origin ? undefined
+        : entry.origin === 'manual' ? 'Up next'
           : entry.origin === 'context' ? (queueContext ? `Playing next from ${queueContext}` : 'Playing next')
-            : 'Smart Continue';
-        data.push({ type: 'header', id: `header-${entry.origin}-${originalIndex}`, title });
-        previousOrigin = entry.origin;
-      }
-      data.push({ type: 'track', id: `track-${entry.track.id}`, track: entry.track, origin: entry.origin, originalIndex });
-    });
-    return data;
+            : 'Smart Continue',
+    }));
   }, [upcomingEntries, queueContext]);
+  const visibleQueueData = dragging ? frozenDragData.current ?? queueData : queueData;
   const manualCount = upcomingEntries.filter((entry) => entry.origin === 'manual').length;
-  const contextCount = upcomingEntries.filter((entry) => entry.origin === 'context').length;
   const autoCount = upcomingEntries.filter((entry) => entry.origin === 'smartContinue').length;
 
-  const removeManual = (track: Track) => {
-    if (removeManualUpcoming(track.id)) show('Removed from queue');
-    setSelectedManual(null);
+  const removeQueued = (track: Track) => {
+    if (removeUpcoming(track.id)) show('Removed from queue');
+    setSelectedUpcoming(null);
   };
 
   const renderRightActions = (item: Track) => {
     return (
       <TouchableOpacity
         style={styles.deleteAction}
-        onPress={() => removeManual(item)}
+        onPress={() => removeQueued(item)}
         accessibilityRole="button"
         accessibilityLabel={`Remove ${item.title} from queue`}
       >
@@ -82,31 +77,22 @@ export default function QueueScreen() {
   };
 
   const renderUpcomingTrack = ({ item, drag, isActive }: RenderItemParams<QueueItem>) => {
-    if (item.type === 'header') {
-      return (
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionLabel}>{item.title}</Text>
-          {item.id.startsWith('header-smartContinue') && (
-            <Sparkles size={14} color={COLORS.accent.violet} style={styles.sectionIcon} />
-          )}
-        </View>
-      );
-    }
-
-    const { track, origin, originalIndex } = item;
+    const { track, origin, sectionTitle } = item;
     const isAuto = origin === 'smartContinue';
-    const isManual = origin === 'manual';
-    const reorderActions = isManual ? [
-      ...(originalIndex > 0 ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
-      ...(originalIndex < manualCount - 1
-        ? [{ name: 'moveDown' as const, label: 'Move later' }]
-        : []),
-    ] : [];
+    const index = (visibleQueueData ?? queueData).findIndex((entry) => entry.id === item.id);
+    const reorderActions = [
+      ...(index > 0 ? [{ name: 'moveUp' as const, label: 'Move earlier' }] : []),
+      ...(index < queueData.length - 1 ? [{ name: 'moveDown' as const, label: 'Move later' }] : []),
+    ];
 
     const row = (
+      <View style={[styles.dragCell, isActive && styles.trackRowActive]}>
+        {sectionTitle && <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionLabel}>{sectionTitle}</Text>
+          {isAuto && <Sparkles size={14} color={COLORS.accent.violet} style={styles.sectionIcon} />}
+        </View>}
       <View style={[
         styles.trackRow,
-        isActive && styles.trackRowActive,
         isAuto && styles.trackRowAuto,
       ]}>
         <TouchableOpacity
@@ -124,7 +110,7 @@ export default function QueueScreen() {
             <Text style={styles.trackArtist} numberOfLines={1}>{settings.offlineMode && !offlineMediaService.isAvailable(track) ? `${track.artist.name} • Streaming only` : track.artist.name}</Text>
           </View>
         </TouchableOpacity>
-        {isManual && <TouchableOpacity
+        <TouchableOpacity
           style={styles.dragHandle}
           onLongPress={drag}
           delayLongPress={180}
@@ -134,34 +120,34 @@ export default function QueueScreen() {
           accessibilityHint="Long press and drag, or use accessibility actions"
           accessibilityActions={reorderActions}
           onAccessibilityAction={(event) => {
-            if (event.nativeEvent.actionName === 'moveUp') reorderQueue(track.id, originalIndex - 1);
-            if (event.nativeEvent.actionName === 'moveDown') reorderQueue(track.id, originalIndex + 1);
+            if (event.nativeEvent.actionName === 'moveUp') moveUpcoming(track.id, index - 1);
+            if (event.nativeEvent.actionName === 'moveDown') moveUpcoming(track.id, index + 1);
           }}
         >
           <GripVertical color={COLORS.text.muted} size={20} />
-        </TouchableOpacity>}
-        {isManual && <TouchableOpacity
+        </TouchableOpacity>
+        <TouchableOpacity
           style={styles.dragHandle}
-          onPress={() => setSelectedManual(track)}
+          onPress={() => setSelectedUpcoming(track)}
           accessibilityRole="button"
           accessibilityLabel={`Queue actions for ${track.title}`}
         >
           <MoreVertical color={COLORS.text.secondary} size={20} />
-        </TouchableOpacity>}
+        </TouchableOpacity>
+      </View>
       </View>
     );
 
-    return isManual ? (
-      <Swipeable
+    return (
+      <ReanimatedSwipeable
         renderRightActions={() => renderRightActions(track)}
         overshootRight={false}
         rightThreshold={64}
-        friction={2}
-        containerStyle={{ overflow: 'visible' }}
+        enabled={!isActive}
       >
         {row}
-      </Swipeable>
-    ) : row;
+      </ReanimatedSwipeable>
+    );
   };
 
   return (
@@ -282,7 +268,7 @@ export default function QueueScreen() {
           </View>
         ) : (
           <DraggableFlatList
-            data={queueData}
+            data={visibleQueueData ?? queueData}
             renderItem={renderUpcomingTrack}
             keyExtractor={(item) => item.id}
             // The library wraps FlatList in its own View. Without sizing that
@@ -292,19 +278,25 @@ export default function QueueScreen() {
             contentContainerStyle={{ paddingBottom: insets.bottom + SIZES.xxl }}
             showsVerticalScrollIndicator={false}
             activationDistance={12}
+            onDragBegin={() => {
+              frozenDragData.current = queueData;
+              setDragging(true);
+            }}
             onDragEnd={({ data: newData, from }) => {
-              const target = manualDropTarget(queueData, newData, from);
-              if (target) reorderQueue(target.trackId, target.toIndex);
+              const target = upcomingDropTarget(frozenDragData.current ?? queueData, newData, from);
+              frozenDragData.current = null;
+              setDragging(false);
+              if (target) moveUpcoming(target.trackId, target.toIndex);
             }}
           />
         )}
       </View>
-      <LiquidSheet visible={selectedManual !== null} onClose={() => setSelectedManual(null)} accessibilityLabel="Queue actions">
-        <Text style={styles.sheetTitle} numberOfLines={1}>{selectedManual?.title}</Text>
-        {selectedManual && <>
-          <TouchableOpacity style={styles.sheetAction} onPress={() => { playNext(selectedManual); setSelectedManual(null); }} accessibilityRole="button"><Text style={styles.sheetActionText}>Play next</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.sheetAction} onPress={() => { reorderQueue(selectedManual.id, 0); setSelectedManual(null); }} accessibilityRole="button"><Text style={styles.sheetActionText}>Move to top</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.sheetAction} onPress={() => removeManual(selectedManual)} accessibilityRole="button"><Text style={styles.sheetActionText}>Remove from queue</Text></TouchableOpacity>
+      <LiquidSheet visible={selectedUpcoming !== null} onClose={() => setSelectedUpcoming(null)} accessibilityLabel="Queue actions">
+        <Text style={styles.sheetTitle} numberOfLines={1}>{selectedUpcoming?.title}</Text>
+        {selectedUpcoming && <>
+          <TouchableOpacity style={styles.sheetAction} onPress={() => { playNext(selectedUpcoming); setSelectedUpcoming(null); }} accessibilityRole="button"><Text style={styles.sheetActionText}>Play next</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.sheetAction} onPress={() => { moveUpcoming(selectedUpcoming.id, 0); setSelectedUpcoming(null); }} accessibilityRole="button"><Text style={styles.sheetActionText}>Move to top</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.sheetAction} onPress={() => removeQueued(selectedUpcoming)} accessibilityRole="button"><Text style={styles.sheetActionText}>Remove from queue</Text></TouchableOpacity>
         </>}
       </LiquidSheet>
     </View>
@@ -429,6 +421,9 @@ const styles = StyleSheet.create({
     paddingVertical: SIZES.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: COLORS.glassBorder,
+  },
+  dragCell: {
+    backgroundColor: THEME.background.elevated,
   },
   trackRowMain: {
     flex: 1,

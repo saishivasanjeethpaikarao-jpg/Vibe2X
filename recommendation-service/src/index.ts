@@ -6,7 +6,7 @@ interface Env {
   RECOMMEND_LIMIT: RateLimit;
 }
 
-type MusicItem = { id: string; title: string; artist: string; album: string; duration: number };
+type MusicItem = { id: string; title: string; artist: string; album: string; duration: number; language?: string };
 type Candidate = MusicItem & { candidateId: string; deterministicScore: number };
 type RequestBody = {
   current: MusicItem; session: MusicItem[]; searchQuery: string; languages: string[];
@@ -26,7 +26,7 @@ function validItem(value: unknown): value is MusicItem {
   return isRecord(value) && stringWithin(value.id, 120) && !!value.id &&
     stringWithin(value.title, 180) && !!value.title.trim() &&
     stringWithin(value.artist, 120) && !!value.artist.trim() &&
-    stringWithin(value.album, 120) && typeof value.duration === 'number' &&
+    stringWithin(value.album, 120) && (value.language === undefined || stringWithin(value.language, 40)) && typeof value.duration === 'number' &&
     Number.isFinite(value.duration) && value.duration >= 0 && value.duration <= 86400;
 }
 function validStrings(value: unknown, maxItems: number, maxLength: number): value is string[] {
@@ -64,7 +64,7 @@ export function validModelRanks(value: unknown, candidates: Candidate[]): Ranked
 
 /** Whitelist every field before forwarding; unknown client fields never reach AI. */
 function sanitized(body: RequestBody): RequestBody {
-  const item = (track: MusicItem): MusicItem => ({ id: track.id, title: track.title, artist: track.artist, album: track.album, duration: track.duration });
+  const item = (track: MusicItem): MusicItem => ({ id: track.id, title: track.title, artist: track.artist, album: track.album, duration: track.duration, language: track.language ?? '' });
   return {
     current: item(body.current), session: body.session.map(item), searchQuery: body.searchQuery,
     languages: [...body.languages], favoriteArtists: [...body.favoriteArtists], likedArtists: [...body.likedArtists],
@@ -82,7 +82,7 @@ class CompatibleChatProvider implements AIProvider {
       method: 'POST', headers: { Authorization: `Bearer ${env.AI_API_KEY}`, 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(4000),
       body: JSON.stringify({ model: env.AI_MODEL, temperature: 0, response_format: { type: 'json_object' }, messages: [
-        { role: 'system', content: 'Rank only supplied real candidateId values by current music/session relevance, related artists, language compatibility when reliable, discovery and diversity. Preferences are soft; current intent wins. Return JSON {"tracks":[{"candidateId":"...","score":0.9}]}. Never invent IDs.' },
+        { role: 'system', content: 'Rank only supplied real candidateId values. Prioritize current-session musical fit, artist relationship, reliable language compatibility, discovery, and diversity. Preferences are soft; current intent wins. Title-word overlap alone is NOT musical relevance. Movie/topic/album overlap alone is NOT musical relevance. Old listening history alone is NOT relevance. Avoid repeat uploads, status/lyrics reposts and a run of one movie or artist. Unknown language is unknown, not a script guess. Return JSON {"tracks":[{"candidateId":"...","score":0.9}]}. Never invent IDs.' },
         { role: 'user', content: JSON.stringify(body) },
       ] }),
     });

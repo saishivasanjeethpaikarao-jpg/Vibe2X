@@ -303,6 +303,50 @@ export class Queue {
     return true;
   }
 
+  /** Move any future entry for this session. An explicit drag pins generated or
+   * collection-context music into Up Next, without editing the saved source. */
+  moveUpcoming(trackId: string, toUpcomingIndex: number): boolean {
+    const upcoming = this.upcomingEntries;
+    const source = upcoming.findIndex(({ track }) => track.id === trackId);
+    if (source < 0 || toUpcomingIndex < 0 || toUpcomingIndex >= upcoming.length) return false;
+    const selected = upcoming[source];
+    const manualIds = upcoming.filter(({ origin }) => origin === 'manual').map(({ track }) => track.id);
+    const contextIds = upcoming.filter(({ origin }) => origin === 'context').map(({ track }) => track.id);
+    const autoIds = upcoming.filter(({ origin }) => origin === 'smartContinue').map(({ track }) => track.id);
+    const promote = selected.origin === 'smartContinue' ||
+      (selected.origin === 'context' && toUpcomingIndex < manualIds.length);
+    // Context tracks remain in their playback-context section when moved
+    // within that section. Crossing into Up Next pins them for this session.
+    if (selected.origin === 'context' && !promote) {
+      contextIds.splice(contextIds.indexOf(trackId), 1);
+      contextIds.splice(Math.min(Math.max(0, toUpcomingIndex - manualIds.length), contextIds.length), 0, trackId);
+    } else {
+      const manualBefore = manualIds.filter((id) => id !== trackId);
+      manualBefore.splice(Math.min(toUpcomingIndex, manualBefore.length), 0, trackId);
+      manualIds.splice(0, manualIds.length, ...manualBefore);
+      if (selected.origin === 'context') contextIds.splice(contextIds.indexOf(trackId), 1);
+      if (selected.origin === 'smartContinue') autoIds.splice(autoIds.indexOf(trackId), 1);
+    }
+    if (selected.origin === 'smartContinue') {
+      const track = this.tracks.find((item) => item.id === trackId)!;
+      track.isAutoSuggested = false;
+    }
+    if (promote) this.contextTrackIds.delete(trackId);
+    const byId = new Map(this.order.slice(this.position + 1).map((index) => [this.tracks[index].id, index]));
+    const before = this.order.slice(this.position + 1).map((index) => this.tracks[index].id);
+    const after = [...manualIds, ...contextIds, ...autoIds];
+    this.order.splice(this.position + 1, after.length, ...after.map((id) => byId.get(id)!));
+    return promote || before.some((id, index) => id !== after[index]);
+  }
+
+  /** Remove only a future entry; the confirmed current track is protected. */
+  removeUpcoming(trackId: string): QueueEntry['origin'] | null {
+    const entry = this.upcomingEntries.find(({ track }) => track.id === trackId);
+    if (!entry) return null;
+    this.remove(trackId, { keepCurrent: true });
+    return entry.origin;
+  }
+
   /** Remove a manual future entry, never the active song or generated tail. */
   removeManualUpcoming(trackId: string): boolean {
     if (!this.manualUpcoming.some((track) => track.id === trackId)) return false;

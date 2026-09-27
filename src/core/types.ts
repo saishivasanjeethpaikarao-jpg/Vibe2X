@@ -32,6 +32,8 @@ export type Track = {
   provider: ProviderId;
   sourceId: string; // provider-native id (YouTube videoId)
   album?: string;
+  /** Only provider-supplied or otherwise reliable metadata; never guessed from script. */
+  language?: string;
   explicit?: boolean;
   isVideo?: boolean; // a music video rather than an official audio track
   isAutoSuggested?: boolean; // track was automatically added by the player
