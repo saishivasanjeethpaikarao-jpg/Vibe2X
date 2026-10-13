@@ -218,3 +218,21 @@ Vibe2X includes code originally created for **NØTE** by **Sanyam Jain**. The or
 The Android native module links **NewPipe Extractor v0.26.5**, copyright Team NewPipe and contributors, under GPL-3.0-or-later. Vibe2X is not affiliated with or endorsed by Team NewPipe, Google, YouTube, or Spotify. Spotify names and marks belong to Spotify AB. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for notices and dependency details.
 
 If you distribute a Vibe2X binary or derivative, you are responsible for complying with GPL-3.0-or-later, including providing the corresponding source and preserving applicable notices.
+
+## Playback flow
+
+```mermaid
+flowchart TD
+    S[Search or playlist import] --> MS[MusicService]
+    MS --> TR{TrackResolver<br/>provider contract}
+    TR -- remote --> YT[YouTubeResolver]
+    TR -- on device --> LC[LocalResolver]
+    YT --> SR{StreamResolver chain}
+    SR -- Android --> NS[NativeStreamSource<br/>NewPipe Extractor]
+    SR -- configured endpoint --> EP[Invidious / Piped / custom]
+    LC --> PE[PlaybackEngine<br/>single expo-audio player]
+    NS --> PE
+    EP --> PE
+    PE --> Q[Queue, shuffle, repeat<br/>media session]
+    Q --> H[LibraryService<br/>listening history + persistence]
+```
